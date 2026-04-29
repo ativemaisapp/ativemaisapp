@@ -8,7 +8,9 @@ export default async function EditarPacientePage({ params }: Props) {
   const { id } = await params;
   const supabase = await createClient();
 
-  const [patientRes, fisiosRes, medsRes] = await Promise.all([
+  const today = new Date().toISOString().split("T")[0];
+
+  const [patientRes, fisiosRes, medsRes, futureApptsRes] = await Promise.all([
     supabase.from("patients").select("*").eq("id", id).single(),
     supabase
       .from("profiles")
@@ -19,11 +21,46 @@ export default async function EditarPacientePage({ params }: Props) {
       .from("medications")
       .select("name, dosage, frequency, notes")
       .eq("patient_id", id),
+    supabase
+      .from("appointments")
+      .select("scheduled_date, scheduled_time")
+      .eq("patient_id", id)
+      .eq("status", "scheduled")
+      .gte("scheduled_date", today)
+      .order("scheduled_date")
+      .limit(30),
   ]);
 
   if (!patientRes.data) notFound();
 
   const p = patientRes.data;
+
+  // Inferir schedule de appointments futuros
+  const DAY_LABELS: Record<number, string> = {
+    0: "Dom", 1: "Seg", 2: "Ter", 3: "Qua", 4: "Qui", 5: "Sex", 6: "Sáb",
+  };
+  const futureAppts = futureApptsRes.data || [];
+  const dayTimeFreq: Record<number, Record<string, number>> = {};
+  futureAppts.forEach((a) => {
+    const dow = new Date(a.scheduled_date + "T12:00:00").getDay();
+    const time = a.scheduled_time || "08:00";
+    if (!dayTimeFreq[dow]) dayTimeFreq[dow] = {};
+    dayTimeFreq[dow][time] = (dayTimeFreq[dow][time] || 0) + 1;
+  });
+
+  const initialSchedule = Object.entries(dayTimeFreq)
+    .map(([dow, times]) => {
+      const dayNum = Number(dow);
+      const mostCommonTime = Object.entries(times).sort(
+        (a, b) => b[1] - a[1]
+      )[0][0];
+      return {
+        day: dayNum,
+        label: DAY_LABELS[dayNum] || "?",
+        time: mostCommonTime,
+      };
+    })
+    .sort((a, b) => (a.day === 0 ? 7 : a.day) - (b.day === 0 ? 7 : b.day));
 
   const initialData = {
     id: p.id,
@@ -61,6 +98,7 @@ export default async function EditarPacientePage({ params }: Props) {
           frequency: m.frequency || "",
           notes: m.notes || "",
         }))}
+        initialSchedule={initialSchedule.length > 0 ? initialSchedule : undefined}
       />
     </div>
   );

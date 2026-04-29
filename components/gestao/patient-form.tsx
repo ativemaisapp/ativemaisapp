@@ -14,6 +14,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { SchedulePicker, type ScheduleEntry } from "@/components/gestao/schedule-picker";
 
 const patientSchema = z.object({
   full_name: z.string().min(1, "Nome obrigatório"),
@@ -26,7 +38,7 @@ const patientSchema = z.object({
   family_phone: z.string().min(1, "Telefone do responsável obrigatório"),
   family_email: z.string().email("E-mail inválido").optional().or(z.literal("")),
   primary_fisio_id: z.string().min(1, "Fisioterapeuta obrigatória"),
-  weekly_frequency: z.string().min(1, "Frequência obrigatória"),
+  weekly_frequency: z.string().optional(),
   session_value: z.string().min(1, "Valor obrigatório"),
   admission_date: z.string().min(1, "Data de início obrigatória"),
   primary_diagnosis: z.string().min(1, "Diagnóstico obrigatório"),
@@ -46,6 +58,7 @@ type Props = {
   fisios: Fisio[];
   initialData?: Record<string, string | number | null | undefined> & { id?: string };
   initialMeds?: MedRow[];
+  initialSchedule?: ScheduleEntry[];
 };
 
 const RELATIONSHIPS = [
@@ -53,10 +66,28 @@ const RELATIONSHIPS = [
   "Sobrinho(a)", "Neto(a)", "Irmão(ã)", "Outro",
 ];
 
-export function PatientForm({ mode, fisios, initialData, initialMeds }: Props) {
+const DAY_MAP_LABELS: Record<number, string> = {
+  0: "Dom", 1: "Seg", 2: "Ter", 3: "Qua", 4: "Qui", 5: "Sex", 6: "Sáb",
+};
+const DAY_MAP_FALLBACK: Record<number, number[]> = {
+  1: [3], 2: [2, 4], 3: [1, 3, 5], 4: [1, 2, 3, 4],
+  5: [1, 2, 3, 4, 5], 6: [1, 2, 3, 4, 5, 6], 7: [0, 1, 2, 3, 4, 5, 6],
+};
+
+function getDefaultSchedule(freq?: number | string | null): ScheduleEntry[] {
+  const n = Number(freq) || 2;
+  const days = DAY_MAP_FALLBACK[n] || [2, 4];
+  return days.map((d) => ({ day: d, label: DAY_MAP_LABELS[d], time: "08:00" }));
+}
+
+export function PatientForm({ mode, fisios, initialData, initialMeds, initialSchedule }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [meds, setMeds] = useState<MedRow[]>(initialMeds || []);
+  const [schedule, setSchedule] = useState<ScheduleEntry[]>(
+    initialSchedule || getDefaultSchedule(initialData?.weekly_frequency)
+  );
+  const [showScheduleConfirm, setShowScheduleConfirm] = useState(false);
 
   const {
     register,
@@ -91,14 +122,45 @@ export function PatientForm({ mode, fisios, initialData, initialMeds }: Props) {
     setMeds((prev) => prev.filter((_, i) => i !== index));
   }
 
+  const [pendingData, setPendingData] = useState<PatientFormData | null>(null);
+  const [futureScheduledCount, setFutureScheduledCount] = useState(0);
+
   async function onSubmit(data: PatientFormData) {
+    if (schedule.length === 0) {
+      toast.error("Selecione ao menos um dia de atendimento");
+      return;
+    }
+    if (mode === "edit") {
+      // Contar appointments futuros que serão recriados
+      const supabase = createClient();
+      const today = new Date().toISOString().split("T")[0];
+      const { count } = await supabase
+        .from("appointments")
+        .select("id", { count: "exact", head: true })
+        .eq("patient_id", initialData?.id || "")
+        .eq("status", "scheduled")
+        .gte("scheduled_date", today);
+      setFutureScheduledCount(count || 0);
+      setPendingData(data);
+      setShowScheduleConfirm(true);
+      return;
+    }
+    doSubmit(data);
+  }
+
+  function confirmScheduleChange() {
+    setShowScheduleConfirm(false);
+    if (pendingData) doSubmit(pendingData);
+  }
+
+  async function doSubmit(data: PatientFormData) {
     setLoading(true);
     const supabase = createClient();
 
     try {
       if (mode === "create") {
         // Criar paciente
-        const freq = parseInt(data.weekly_frequency);
+        const freq = schedule.length;
         const ticket = parseFloat(data.session_value);
 
         const { data: newPatient, error } = await supabase
@@ -146,7 +208,7 @@ export function PatientForm({ mode, fisios, initialData, initialMeds }: Props) {
         }
 
         // Gerar appointments para os próximos 30 dias
-        await generateAppointments(supabase, newPatient.id, data.primary_fisio_id, freq, data.admission_date);
+        await generateAppointments(supabase, newPatient.id, data.primary_fisio_id, schedule, data.admission_date);
 
         toast.success("Paciente cadastrado com sucesso");
         router.push(`/pacientes/${newPatient.id}`);
@@ -168,7 +230,7 @@ export function PatientForm({ mode, fisios, initialData, initialMeds }: Props) {
             family_phone: data.family_phone,
             family_email: data.family_email || null,
             primary_fisio_id: data.primary_fisio_id,
-            weekly_frequency: parseInt(data.weekly_frequency),
+            weekly_frequency: schedule.length,
             session_value: parseFloat(data.session_value),
             admission_date: data.admission_date,
             primary_diagnosis: data.primary_diagnosis,
@@ -179,6 +241,23 @@ export function PatientForm({ mode, fisios, initialData, initialMeds }: Props) {
           .eq("id", patientId);
 
         if (error) throw new Error(error.message);
+
+        // Recriar appointments futuros com novo schedule
+        const today = new Date().toISOString().split("T")[0];
+        await supabase
+          .from("appointments")
+          .delete()
+          .eq("patient_id", patientId)
+          .eq("status", "scheduled")
+          .gte("scheduled_date", today);
+
+        await generateAppointments(
+          supabase,
+          patientId,
+          data.primary_fisio_id,
+          schedule,
+          today
+        );
 
         toast.success("Paciente atualizado com sucesso");
         router.push(`/pacientes/${patientId}`);
@@ -292,17 +371,14 @@ export function PatientForm({ mode, fisios, initialData, initialMeds }: Props) {
             </select>
             <FieldError message={errors.primary_fisio_id?.message} />
           </div>
-          <div>
-            <Label>Frequência semanal *</Label>
-            <select
-              {...register("weekly_frequency")}
-              className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/50"
-            >
-              {[1, 2, 3, 4, 5, 6, 7].map((n) => (
-                <option key={n} value={n}>{n}x por semana</option>
-              ))}
-            </select>
-            <FieldError message={errors.weekly_frequency?.message} />
+          <div className="sm:col-span-2">
+            <Label>Dias e horários dos atendimentos *</Label>
+            <div className="mt-1.5">
+              <SchedulePicker value={schedule} onChange={setSchedule} />
+            </div>
+            <p className="mt-1.5 text-xs text-cinza-texto">
+              {schedule.length}x por semana
+            </p>
           </div>
           <div>
             <Label>Valor por sessão (R$) *</Label>
@@ -416,29 +492,42 @@ export function PatientForm({ mode, fisios, initialData, initialMeds }: Props) {
           </Button>
         </div>
       </div>
+      {/* AlertDialog para confirmação de mudança de schedule no edit */}
+      <AlertDialog open={showScheduleConfirm} onOpenChange={setShowScheduleConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Recriar agendamentos futuros?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Você alterou os dias e horários de atendimento. Isso vai recriar os
+              agendamentos futuros ({futureScheduledCount} agendamento
+              {futureScheduledCount !== 1 ? "s" : ""}). Atendimentos já
+              realizados ou em andamento não serão afetados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="cursor-pointer">Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmScheduleChange}
+              className="bg-verde-ative hover:bg-verde-ative/90 cursor-pointer"
+            >
+              Confirmar e salvar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </form>
   );
 }
 
-// Gera appointments para os próximos 30 dias a partir da data de início
+// Gera appointments para os próximos 30 dias com dias/horários do schedule
 async function generateAppointments(
   supabase: ReturnType<typeof createClient>,
   patientId: string,
   fisioId: string,
-  frequency: number,
+  schedule: ScheduleEntry[],
   startDate: string
 ) {
-  const DAY_MAP: Record<number, number[]> = {
-    1: [3],          // qua
-    2: [2, 4],       // ter, qui
-    3: [1, 3, 5],    // seg, qua, sex
-    4: [1, 2, 3, 4], // seg-qui
-    5: [1, 2, 3, 4, 5], // seg-sex
-    6: [1, 2, 3, 4, 5, 6],
-    7: [0, 1, 2, 3, 4, 5, 6],
-  };
-
-  const days = DAY_MAP[frequency] || [3];
+  const dayTimeMap = new Map(schedule.map((s) => [s.day, s.time]));
   const start = new Date(startDate + "T12:00:00");
   const end = new Date(start);
   end.setDate(end.getDate() + 30);
@@ -453,14 +542,13 @@ async function generateAppointments(
 
   const current = new Date(start);
   while (current <= end) {
-    if (days.includes(current.getDay())) {
-      const hour = 7 + Math.floor(Math.random() * 10);
-      const minute = Math.random() < 0.5 ? "00" : "30";
+    const time = dayTimeMap.get(current.getDay());
+    if (time) {
       appointments.push({
         patient_id: patientId,
         fisio_id: fisioId,
         scheduled_date: current.toISOString().split("T")[0],
-        scheduled_time: `${String(hour).padStart(2, "0")}:${minute}`,
+        scheduled_time: time,
         status: "scheduled",
       });
     }
