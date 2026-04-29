@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { TrendingUp, CheckCircle2, Calendar, Users, Clock } from "lucide-react";
+import Link from "next/link";
+import { TrendingUp, CheckCircle2, Calendar, Users, Clock, Stethoscope, ArrowRight } from "lucide-react";
 
 export const metadata: Metadata = { title: "Dashboard" };
 import {
@@ -12,7 +13,9 @@ import {
 } from "date-fns";
 
 import { createClient } from "@/lib/supabase/server";
+import { profileAtendePacientes } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { KpiCard } from "@/components/gestao/kpi-card";
 import { AttentionCard } from "@/components/gestao/attention-card";
@@ -48,6 +51,22 @@ export default async function DashboardPage() {
     .single();
 
   const firstName = profile?.full_name.split(" ")[0] || "";
+
+  // ── Verificar se profile atende pacientes ──
+  const atendePacientes = await profileAtendePacientes(user!.id, supabase);
+
+  // ── Query de appointments do dia (para card de atendimentos) ──
+  let myTodayTotal = 0;
+  let myTodayConcluidos = 0;
+  if (atendePacientes) {
+    const { data: myAppts } = await supabase
+      .from("appointments")
+      .select("status")
+      .eq("fisio_id", user!.id)
+      .eq("scheduled_date", format(spNow, "yyyy-MM-dd"));
+    myTodayTotal = myAppts?.length || 0;
+    myTodayConcluidos = myAppts?.filter((a) => a.status === "completed").length || 0;
+  }
 
   // ── 5 queries em paralelo ──
   const monthRef = format(spNow, "yyyy-MM");
@@ -253,6 +272,33 @@ export default async function DashboardPage() {
           Aqui está o panorama da Ative+60 hoje.
         </p>
       </div>
+
+      {/* Card Atendimentos de hoje (só para quem atende) */}
+      {atendePacientes && (
+        <div className="rounded-lg border-l-4 border-verde-ative bg-verde-ative/8 p-6">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <Stethoscope className="mt-0.5 h-8 w-8 shrink-0 text-verde-ative" />
+              <div>
+                <p className="text-lg font-semibold text-tinta-texto">
+                  Atendimentos de hoje
+                </p>
+                <p className="text-sm text-cinza-texto">
+                  {myTodayTotal === 0
+                    ? "Você não tem atendimentos hoje."
+                    : `Você tem ${myTodayTotal} atendimento${myTodayTotal > 1 ? "s" : ""} hoje. ${myTodayConcluidos} já concluído${myTodayConcluidos !== 1 ? "s" : ""}.`}
+                </p>
+              </div>
+            </div>
+            <Link href="/agenda" className="shrink-0">
+              <Button className="bg-verde-ative hover:bg-verde-ative/90 text-white cursor-pointer">
+                Ver minha agenda
+                <ArrowRight className="ml-1 h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">

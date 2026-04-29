@@ -8,36 +8,71 @@ import {
   HeartPulse,
   DollarSign,
   Settings,
+  Calendar,
+  UserCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  badgeKey: "pacientes" | "financeiro" | "agenda" | null;
+};
+
+const BASE_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, badgeKey: null },
-  { href: "/pacientes", label: "Pacientes", icon: Users, badgeKey: "pacientes" as const },
+];
+
+const FISIO_ITEMS: NavItem[] = [
+  { href: "/agenda", label: "Minha agenda", icon: Calendar, badgeKey: "agenda" },
+  { href: "/meus-pacientes", label: "Meus pacientes", icon: UserCheck, badgeKey: null },
+];
+
+const GESTAO_ITEMS: NavItem[] = [
+  { href: "/pacientes", label: "Pacientes", icon: Users, badgeKey: "pacientes" },
   { href: "/equipe", label: "Equipe", icon: HeartPulse, badgeKey: null },
-  { href: "/financeiro", label: "Financeiro", icon: DollarSign, badgeKey: "financeiro" as const },
+  { href: "/financeiro", label: "Financeiro", icon: DollarSign, badgeKey: "financeiro" },
   { href: "/configuracoes", label: "Configurações", icon: Settings, badgeKey: null },
 ];
 
-type Badges = { pacientes?: number; financeiro?: number };
+type Badges = {
+  pacientes?: number;
+  financeiro?: number;
+  agenda?: number;
+};
 
 export function SidebarNav({
   onNavigate,
   badges,
+  atendePacientes = false,
+  agendaPendentes = 0,
 }: {
   onNavigate?: () => void;
   badges?: Badges;
+  atendePacientes?: boolean;
+  agendaPendentes?: number;
 }) {
   const pathname = usePathname();
 
+  const items: NavItem[] = [
+    ...BASE_ITEMS,
+    ...(atendePacientes ? FISIO_ITEMS : []),
+    ...GESTAO_ITEMS,
+  ];
+
+  const allBadges: Badges = {
+    ...badges,
+    agenda: agendaPendentes > 0 ? agendaPendentes : undefined,
+  };
+
   return (
     <nav className="flex flex-col gap-1 px-3 py-4">
-      {NAV_ITEMS.map((item) => {
+      {items.map((item) => {
         const isActive =
           pathname === item.href || pathname.startsWith(item.href + "/");
         const Icon = item.icon;
-        const badgeValue =
-          item.badgeKey && badges ? badges[item.badgeKey] : undefined;
+        const badgeValue = item.badgeKey ? allBadges[item.badgeKey] : undefined;
 
         return (
           <Link
@@ -57,9 +92,11 @@ export function SidebarNav({
               <span
                 className={cn(
                   "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium",
-                  isActive
-                    ? "bg-verde-ative/20 text-verde-ative"
-                    : "bg-linha-suave text-cinza-texto"
+                  item.badgeKey === "agenda"
+                    ? "bg-laranja-ative/20 text-laranja-ative"
+                    : isActive
+                      ? "bg-verde-ative/20 text-verde-ative"
+                      : "bg-linha-suave text-cinza-texto"
                 )}
               >
                 {badgeValue}

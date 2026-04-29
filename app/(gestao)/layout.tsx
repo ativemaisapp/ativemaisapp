@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/server";
+import { profileAtendePacientes } from "@/lib/permissions";
 import { LogoAtive } from "@/components/logo-ative";
 import { SidebarNav } from "@/components/gestao/sidebar-nav";
 import { Header } from "@/components/gestao/header";
@@ -18,30 +19,42 @@ export default async function GestaoLayout({
 
   if (!user) redirect("/login");
 
-  const [profileRes, patientsCountRes, billingOpenRes] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("full_name, email, avatar_url, role")
-      .eq("id", user.id)
-      .single(),
-    supabase
-      .from("patients")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "active"),
-    supabase
-      .from("billing_status")
-      .select("id", { count: "exact", head: true })
-      .eq("reference_month", format(new Date(), "yyyy-MM"))
-      .eq("status", "open"),
-  ]);
+  const spNow = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+  );
+  const today = format(spNow, "yyyy-MM-dd");
+
+  const [profileRes, patientsCountRes, billingOpenRes, agendaPendingRes] =
+    await Promise.all([
+      supabase
+        .from("profiles")
+        .select("full_name, email, avatar_url, role")
+        .eq("id", user.id)
+        .single(),
+      supabase
+        .from("patients")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "active"),
+      supabase
+        .from("billing_status")
+        .select("id", { count: "exact", head: true })
+        .eq("reference_month", format(spNow, "yyyy-MM"))
+        .eq("status", "open"),
+      supabase
+        .from("appointments")
+        .select("id", { count: "exact", head: true })
+        .eq("fisio_id", user.id)
+        .eq("scheduled_date", today)
+        .in("status", ["scheduled", "in_progress"]),
+    ]);
 
   const profile = profileRes.data;
   if (!profile || profile.role !== "gestao") redirect("/agenda");
 
   const patientsCount = patientsCountRes.count || 0;
-  // Cobranças em aberto = pacientes ativos sem billing_status paid
-  // Simplificado: mostra count de billing_status open no mês
   const billingOpenCount = billingOpenRes.count || 0;
+  const agendaPendentes = agendaPendingRes.count || 0;
+  const atendePacientes = await profileAtendePacientes(user.id, supabase);
 
   return (
     <div className="flex h-screen bg-creme-fundo">
@@ -52,6 +65,8 @@ export default async function GestaoLayout({
         </div>
         <SidebarNav
           badges={{ pacientes: patientsCount, financeiro: billingOpenCount }}
+          atendePacientes={atendePacientes}
+          agendaPendentes={agendaPendentes}
         />
       </aside>
 
