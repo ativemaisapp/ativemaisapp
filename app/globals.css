@@ -1,0 +1,119 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ── Paleta oficial Ative+60 + tokens shadcn ────────────────────────────── */
+
+@theme inline {
+  /* Cores Ative+60 (uso direto: bg-verde-ative, text-tinta-texto, etc.) */
+  --color-verde-ative: #7C9885;
+  --color-laranja-ative: #D9824B;
+  --color-creme-fundo: #F5F1EA;
+  --color-branco-card: #FFFFFF;
+  --color-tinta-texto: #1C2A24;
+  --color-cinza-texto: #6B7B73;
+  --color-linha-suave: #E5E0D5;
+  --color-verde-sucesso: #2E6B4F;
+  --color-vermelho-alerta: #B85850;
+  --color-ambar-aviso: #C68A3F;
+
+  /* Tokens semânticos shadcn (mapeados para Ative+60) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Sidebar (reservado para uso futuro) */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Charts */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Tipografia */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+
+  /* Radius */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Mapeamento shadcn → Ative+60 (sem dark mode no MVP) */
+:root {
+  --background: #F5F1EA;
+  --foreground: #1C2A24;
+  --card: #FFFFFF;
+  --card-foreground: #1C2A24;
+  --popover: #FFFFFF;
+  --popover-foreground: #1C2A24;
+  --primary: #7C9885;
+  --primary-foreground: #FFFFFF;
+  --secondary: #E5E0D5;
+  --secondary-foreground: #1C2A24;
+  --muted: #EDE9E0;
+  --muted-foreground: #6B7B73;
+  --accent: #E5E0D5;
+  --accent-foreground: #1C2A24;
+  --destructive: #B85850;
+  --border: #E5E0D5;
+  --input: #E5E0D5;
+  --ring: #7C9885;
+  --chart-1: #7C9885;
+  --chart-2: #D9824B;
+  --chart-3: #2E6B4F;
+  --chart-4: #C68A3F;
+  --chart-5: #B85850;
+  --radius: 0.625rem;
+  --sidebar: #F5F1EA;
+  --sidebar-foreground: #1C2A24;
+  --sidebar-primary: #7C9885;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #E5E0D5;
+  --sidebar-accent-foreground: #1C2A24;
+  --sidebar-border: #E5E0D5;
+  --sidebar-ring: #7C9885;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
