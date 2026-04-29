@@ -1,19 +1,33 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { format } from "date-fns";
 import {
   Calendar,
+  CalendarClock,
   Check,
   Clock,
   MapPin,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type Appointment = {
   id: string;
@@ -45,13 +59,92 @@ export function AgendaContent({
   pendingCount,
 }: Props) {
   const router = useRouter();
+  const [rescheduleAppt, setRescheduleAppt] = useState<Appointment | null>(null);
+  const [newDate, setNewDate] = useState("");
+  const [newTime, setNewTime] = useState("");
+  const [saving, setSaving] = useState(false);
 
   function handleDateChange(date: string) {
     router.push(`/agenda?data=${date}`);
   }
 
+  function openReschedule(appt: Appointment) {
+    setRescheduleAppt(appt);
+    setNewDate(selectedDate);
+    setNewTime(appt.scheduledTime?.slice(0, 5) || "08:00");
+  }
+
+  async function confirmReschedule() {
+    if (!rescheduleAppt || !newDate || !newTime) return;
+    setSaving(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("appointments")
+      .update({ scheduled_date: newDate, scheduled_time: newTime })
+      .eq("id", rescheduleAppt.id);
+    setSaving(false);
+    if (error) {
+      toast.error("Erro ao reagendar: " + error.message);
+      return;
+    }
+    toast.success(
+      `Reagendado para ${newDate.split("-").reverse().join("/")} às ${newTime}`
+    );
+    setRescheduleAppt(null);
+    router.refresh();
+  }
+
   return (
     <>
+      {/* Dialog de reagendamento */}
+      <Dialog
+        open={!!rescheduleAppt}
+        onOpenChange={(open) => !open && setRescheduleAppt(null)}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reagendar sessão</DialogTitle>
+            <DialogDescription>
+              {rescheduleAppt?.patientName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div>
+              <Label>Nova data</Label>
+              <Input
+                type="date"
+                value={newDate}
+                onChange={(e) => setNewDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>Novo horário</Label>
+              <Input
+                type="time"
+                value={newTime}
+                onChange={(e) => setNewTime(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRescheduleAppt(null)}
+              className="cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={confirmReschedule}
+              disabled={saving || !newDate || !newTime}
+              className="bg-verde-ative hover:bg-verde-ative/90 text-white cursor-pointer"
+            >
+              {saving ? "Salvando..." : "Confirmar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Date picker + resumo */}
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
@@ -85,7 +178,11 @@ export function AgendaContent({
       ) : (
         <div className="space-y-3">
           {appointments.map((appt) => (
-            <AppointmentCard key={appt.id} appt={appt} />
+            <AppointmentCard
+              key={appt.id}
+              appt={appt}
+              onReschedule={openReschedule}
+            />
           ))}
         </div>
       )}
@@ -93,7 +190,13 @@ export function AgendaContent({
   );
 }
 
-function AppointmentCard({ appt }: { appt: Appointment }) {
+function AppointmentCard({
+  appt,
+  onReschedule,
+}: {
+  appt: Appointment;
+  onReschedule: (appt: Appointment) => void;
+}) {
   const time = appt.scheduledTime?.slice(0, 5) || "—";
 
   if (appt.status === "completed") {
@@ -193,11 +296,20 @@ function AppointmentCard({ appt }: { appt: Appointment }) {
             </Badge>
           </div>
         </div>
-        <Link href={`/atendimento/${appt.id}`}>
-          <Button className="h-12 w-full bg-verde-ative hover:bg-verde-ative/90 text-white text-base cursor-pointer">
-            Iniciar atendimento
+        <div className="flex gap-2">
+          <Link href={`/atendimento/${appt.id}`} className="flex-1">
+            <Button className="h-12 w-full bg-verde-ative hover:bg-verde-ative/90 text-white text-base cursor-pointer">
+              Iniciar atendimento
+            </Button>
+          </Link>
+          <Button
+            variant="outline"
+            className="h-12 px-3 cursor-pointer"
+            onClick={() => onReschedule(appt)}
+          >
+            <CalendarClock className="h-5 w-5" />
           </Button>
-        </Link>
+        </div>
       </CardContent>
     </Card>
   );
