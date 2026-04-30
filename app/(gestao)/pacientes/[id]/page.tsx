@@ -29,7 +29,7 @@ export default async function PatientDetailPage({ params }: Props) {
   const supabase = await createClient();
 
   // Fetch tudo em paralelo
-  const [patientRes, medsRes, evolutionsRes, examsRes, nextApptRes, reportsRes] =
+  const [patientRes, medsRes, evolutionsRes, examsRes, nextApptRes, reportsRes, allApptsRes] =
     await Promise.all([
       supabase
         .from("patients")
@@ -69,6 +69,13 @@ export default async function PatientDetailPage({ params }: Props) {
         .select("*")
         .eq("patient_id", id)
         .order("reference_month", { ascending: false }),
+      supabase
+        .from("appointments")
+        .select("id, scheduled_date, scheduled_time, status, reschedule_reason, reschedule_notes, rescheduled_to, profiles!appointments_fisio_id_fkey(full_name)")
+        .eq("patient_id", id)
+        .in("status", ["missed", "cancelled"])
+        .order("scheduled_date", { ascending: false })
+        .limit(50),
     ]);
 
   if (!patientRes.data) notFound();
@@ -83,6 +90,11 @@ export default async function PatientDetailPage({ params }: Props) {
   const exams = examsRes.data || [];
   const reports = reportsRes.data || [];
   const nextAppt = nextApptRes.data?.[0] || null;
+  const allAppts = (allApptsRes.data || []).map((a) => ({
+    ...a,
+    fisioName:
+      (a.profiles as unknown as { full_name: string })?.full_name || "—",
+  }));
 
   const fisioName =
     (patient.profiles as unknown as { full_name: string })?.full_name || "—";
@@ -205,6 +217,8 @@ export default async function PatientDetailPage({ params }: Props) {
         evolutions={evolutions}
         exams={exams}
         reports={reports}
+        appointments={allAppts}
+        isGestao={true}
       />
     </div>
   );

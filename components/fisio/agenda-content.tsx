@@ -1,33 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { format } from "date-fns";
 import {
   Calendar,
-  CalendarClock,
   Check,
   Clock,
   MapPin,
   X,
 } from "lucide-react";
-import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { AppointmentActions } from "@/components/fisio/appointment-actions";
 
 type Appointment = {
   id: string;
@@ -35,6 +22,9 @@ type Appointment = {
   checkInAt: string | null;
   checkOutAt: string | null;
   status: string;
+  rescheduleReason: string | null;
+  rescheduleNotes: string | null;
+  rescheduledTo: string | null;
   patientId: string;
   patientName: string;
   address: string;
@@ -48,6 +38,9 @@ type Props = {
   totalCount: number;
   completedCount: number;
   pendingCount: number;
+  missedCount?: number;
+  cancelledCount?: number;
+  fisioId?: string;
 };
 
 export function AgendaContent({
@@ -57,97 +50,21 @@ export function AgendaContent({
   totalCount,
   completedCount,
   pendingCount,
+  missedCount = 0,
+  cancelledCount = 0,
+  fisioId,
 }: Props) {
   const router = useRouter();
-  const [rescheduleAppt, setRescheduleAppt] = useState<Appointment | null>(null);
-  const [newDate, setNewDate] = useState("");
-  const [newTime, setNewTime] = useState("");
-  const [saving, setSaving] = useState(false);
 
   function handleDateChange(date: string) {
     router.push(`/agenda?data=${date}`);
   }
 
-  function openReschedule(appt: Appointment) {
-    setRescheduleAppt(appt);
-    setNewDate(selectedDate);
-    setNewTime(appt.scheduledTime?.slice(0, 5) || "08:00");
-  }
-
-  async function confirmReschedule() {
-    if (!rescheduleAppt || !newDate || !newTime) return;
-    setSaving(true);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("appointments")
-      .update({ scheduled_date: newDate, scheduled_time: newTime })
-      .eq("id", rescheduleAppt.id);
-    setSaving(false);
-    if (error) {
-      toast.error("Erro ao reagendar: " + error.message);
-      return;
-    }
-    toast.success(
-      `Reagendado para ${newDate.split("-").reverse().join("/")} às ${newTime}`
-    );
-    setRescheduleAppt(null);
-    router.refresh();
-  }
-
   return (
     <>
-      {/* Dialog de reagendamento */}
-      <Dialog
-        open={!!rescheduleAppt}
-        onOpenChange={(open) => !open && setRescheduleAppt(null)}
-      >
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Reagendar sessão</DialogTitle>
-            <DialogDescription>
-              {rescheduleAppt?.patientName}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div>
-              <Label>Nova data</Label>
-              <Input
-                type="date"
-                value={newDate}
-                onChange={(e) => setNewDate(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label>Novo horário</Label>
-              <Input
-                type="time"
-                value={newTime}
-                onChange={(e) => setNewTime(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setRescheduleAppt(null)}
-              className="cursor-pointer"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={confirmReschedule}
-              disabled={saving || !newDate || !newTime}
-              className="bg-verde-ative hover:bg-verde-ative/90 text-white cursor-pointer"
-            >
-              {saving ? "Salvando..." : "Confirmar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Date picker + resumo */}
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
           <Badge className="bg-tinta-texto/10 text-tinta-texto border-transparent text-xs">
             {totalCount} {totalCount === 1 ? "atendimento" : "atendimentos"}
           </Badge>
@@ -157,6 +74,16 @@ export function AgendaContent({
           <Badge className="bg-laranja-ative/15 text-laranja-ative border-transparent text-xs">
             {pendingCount} {pendingCount === 1 ? "pendente" : "pendentes"}
           </Badge>
+          {missedCount > 0 && (
+            <Badge className="bg-ambar-aviso/15 text-ambar-aviso border-transparent text-xs">
+              {missedCount} {missedCount === 1 ? "falta" : "faltas"}
+            </Badge>
+          )}
+          {cancelledCount > 0 && (
+            <Badge className="bg-cinza-texto/10 text-cinza-texto border-transparent text-xs">
+              {cancelledCount} {cancelledCount === 1 ? "cancelado" : "cancelados"}
+            </Badge>
+          )}
         </div>
         <input
           type="date"
@@ -181,7 +108,8 @@ export function AgendaContent({
             <AppointmentCard
               key={appt.id}
               appt={appt}
-              onReschedule={openReschedule}
+              selectedDate={selectedDate}
+              fisioId={fisioId}
             />
           ))}
         </div>
@@ -192,10 +120,12 @@ export function AgendaContent({
 
 function AppointmentCard({
   appt,
-  onReschedule,
+  selectedDate,
+  fisioId,
 }: {
   appt: Appointment;
-  onReschedule: (appt: Appointment) => void;
+  selectedDate: string;
+  fisioId?: string;
 }) {
   const time = appt.scheduledTime?.slice(0, 5) || "—";
 
@@ -223,7 +153,7 @@ function AppointmentCard({
 
   if (appt.status === "missed" || appt.status === "cancelled") {
     return (
-      <Card className="opacity-50">
+      <Card className="opacity-60">
         <CardContent className="flex items-center gap-3 pt-1">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cinza-texto/10">
             <X className="h-5 w-5 text-cinza-texto" />
@@ -233,6 +163,12 @@ function AppointmentCard({
             <p className="text-xs text-cinza-texto">
               {appt.status === "missed" ? "Faltou" : "Cancelado"}
             </p>
+            {appt.rescheduleReason && (
+              <p className="mt-0.5 text-xs text-ambar-aviso">
+                {appt.rescheduleReason}
+                {appt.rescheduleNotes ? ` — ${appt.rescheduleNotes}` : ""}
+              </p>
+            )}
           </div>
           <span className="text-sm text-cinza-texto">{time}</span>
         </CardContent>
@@ -302,13 +238,13 @@ function AppointmentCard({
               Iniciar atendimento
             </Button>
           </Link>
-          <Button
-            variant="outline"
-            className="h-12 px-3 cursor-pointer"
-            onClick={() => onReschedule(appt)}
-          >
-            <CalendarClock className="h-5 w-5" />
-          </Button>
+          {fisioId && (
+            <AppointmentActions
+              appointment={appt}
+              fisioId={fisioId}
+              selectedDate={selectedDate}
+            />
+          )}
         </div>
       </CardContent>
     </Card>

@@ -8,9 +8,9 @@ import {
 import { ptBR } from "date-fns/locale";
 
 import { createClient } from "@/lib/supabase/server";
+import { isAppointmentBillable, isAppointmentPayable, isEvolutionComplete } from "@/lib/evolution-rules";
 
 export const metadata: Metadata = { title: "Financeiro" };
-import { formatCurrency } from "@/lib/utils";
 import { FinanceiroContent } from "@/components/gestao/financeiro-content";
 
 type SearchParams = Promise<{ mes?: string }>;
@@ -29,7 +29,11 @@ export default async function FinanceiroPage({
   const monthStart = format(startOfMonth(monthDate), "yyyy-MM-dd");
   const monthEnd = format(endOfMonth(monthDate), "yyyy-MM-dd");
 
-  // Meses disponíveis
+  // Mês anterior para comparativo de taxa
+  const prevMonthDate = subMonths(monthDate, 1);
+  const prevMonthStart = format(startOfMonth(prevMonthDate), "yyyy-MM-dd");
+  const prevMonthEnd = format(endOfMonth(prevMonthDate), "yyyy-MM-dd");
+
   const months = Array.from({ length: 13 }, (_, i) => {
     const d = subMonths(now, i);
     return {
@@ -38,11 +42,11 @@ export default async function FinanceiroPage({
     };
   });
 
-  // Queries paralelas
   const [
     activePatientsRes,
-    completedAptsRes,
+    billableAptsRes,
     allAptsRes,
+    prevAllAptsRes,
     fisiosRes,
     evolutionsRes,
     billingRes,
@@ -54,24 +58,33 @@ export default async function FinanceiroPage({
         "id, full_name, weekly_frequency, session_value, primary_fisio_id, profiles!patients_primary_fisio_id_fkey(full_name)"
       )
       .eq("status", "active"),
+    // Appointments billable (completed + missed) do mês
     supabase
       .from("appointments")
-      .select("patient_id, patients!inner(session_value, full_name)")
-      .eq("status", "completed")
+      .select("patient_id, status, patients!inner(session_value, full_name)")
+      .in("status", ["completed", "missed"])
       .gte("scheduled_date", monthStart)
       .lte("scheduled_date", monthEnd),
+    // Todos appointments do mês (para auditoria)
     supabase
       .from("appointments")
-      .select("status, patient_id")
+      .select("id, status, patient_id, fisio_id, reschedule_reason, patients!inner(full_name)")
       .gte("scheduled_date", monthStart)
       .lte("scheduled_date", monthEnd),
+    // Mês anterior (para taxa comparativa)
+    supabase
+      .from("appointments")
+      .select("status")
+      .gte("scheduled_date", prevMonthStart)
+      .lte("scheduled_date", prevMonthEnd),
     supabase
       .from("profiles")
       .select("id, full_name, repasse_value, role")
-      .eq("role", "fisio"),
+      .in("role", ["fisio", "gestao"]),
+    // Evoluções com dados completos para isEvolutionComplete
     supabase
       .from("evolutions")
-      .select("fisio_id")
+      .select("fisio_id, bp_initial, bp_final, hr_initial, hr_final, spo2_initial, spo2_final, rr_initial, rr_final, conducts, had_intercurrence, intercurrence_description, appointments!inner(status)")
       .gte("created_at", monthStart + "T00:00:00")
       .lte("created_at", monthEnd + "T23:59:59"),
     supabase
@@ -85,8 +98,9 @@ export default async function FinanceiroPage({
   ]);
 
   const activePatients = activePatientsRes.data || [];
-  const completedApts = completedAptsRes.data || [];
+  const billableApts = billableAptsRes.data || [];
   const allApts = allAptsRes.data || [];
+  const prevAllApts = prevAllAptsRes.data || [];
   const fisios = fisiosRes.data || [];
   const evolutions = evolutionsRes.data || [];
   const billingStatuses = billingRes.data || [];
@@ -98,33 +112,48 @@ export default async function FinanceiroPage({
     0
   );
 
-  // KPI 2: Receita realizada + ticket médio
-  const receitaRealizada = completedApts.reduce((sum, a) => {
+  // KPI 2: Receita realizada (completed + missed)
+  const receitaRealizada = billableApts.reduce((sum, a) => {
     const sv = (a.patients as unknown as { session_value: number })?.session_value || 0;
     return sum + sv;
   }, 0);
-  const completedCount = completedApts.length;
+  const completedCount = billableApts.filter((a) => a.status === "completed").length;
   const ticketMedio = completedCount > 0 ? receitaRealizada / completedCount : 0;
   const percentRealizada = receitaProjetada > 0 ? Math.round((receitaRealizada / receitaProjetada) * 100) : 0;
 
-  // KPI 3: Repasses
-  const evosByFisio: Record<string, number> = {};
+  // KPI 3: Repasses (usando política isAppointmentPayable)
+  const payableByFisio: Record<string, { total: number; qualified: number }> = {};
   evolutions.forEach((e) => {
-    evosByFisio[e.fisio_id] = (evosByFisio[e.fisio_id] || 0) + 1;
+    const fid = e.fisio_id;
+    if (!payableByFisio[fid]) payableByFisio[fid] = { total: 0, qualified: 0 };
+    payableByFisio[fid].total++;
+    const apptStatus = (e.appointments as unknown as { status: string })?.status;
+    if (isAppointmentPayable({ status: apptStatus || "" }, e as any)) {
+      payableByFisio[fid].qualified++;
+    }
+  });
+
+  // Adicionar missed appointments (fisio cumpriu deslocamento, sem evolução)
+  const missedByFisio: Record<string, number> = {};
+  allApts.filter((a) => a.status === "missed").forEach((a) => {
+    missedByFisio[a.fisio_id] = (missedByFisio[a.fisio_id] || 0) + 1;
   });
 
   const repasseTotal = fisios.reduce((sum, f) => {
-    const count = evosByFisio[f.id] || 0;
-    return sum + count * (f.repasse_value || 0);
+    const qualifiedEvos = payableByFisio[f.id]?.qualified || 0;
+    const missedAppts = missedByFisio[f.id] || 0;
+    return sum + (qualifiedEvos + missedAppts) * (f.repasse_value || 0);
   }, 0);
-  const fisiosComSessoes = fisios.filter((f) => (evosByFisio[f.id] || 0) > 0).length;
+  const fisiosComSessoes = fisios.filter(
+    (f) => (payableByFisio[f.id]?.total || 0) > 0 || (missedByFisio[f.id] || 0) > 0
+  ).length;
 
   // KPI 4: Lucro
   const lucro = receitaRealizada - repasseTotal;
 
-  // Dados para tabela de cobranças
+  // Tabela de cobranças (billable: completed + missed)
   const sessionsByPatient: Record<string, number> = {};
-  completedApts.forEach((a) => {
+  billableApts.forEach((a) => {
     sessionsByPatient[a.patient_id] = (sessionsByPatient[a.patient_id] || 0) + 1;
   });
 
@@ -150,24 +179,87 @@ export default async function FinanceiroPage({
     })
     .sort((a, b) => b.valor - a.valor);
 
-  // Dados para tabela de repasses
+  // Tabela de repasses com % qualificado
   const payrollMap = new Map(payrollStatuses.map((p) => [p.fisio_id, p]));
 
   const payrollRows = fisios.map((f) => {
-    const sessions = evosByFisio[f.id] || 0;
-    const total = sessions * (f.repasse_value || 0);
+    const evoData = payableByFisio[f.id] || { total: 0, qualified: 0 };
+    const missed = missedByFisio[f.id] || 0;
+    const payableSessions = evoData.qualified + missed;
+    const total = payableSessions * (f.repasse_value || 0);
     const payroll = payrollMap.get(f.id);
+    const denominator = evoData.total + missed;
     return {
       fisioId: f.id,
       fisioName: f.full_name,
-      sessions,
+      sessions: payableSessions,
       repasseValue: f.repasse_value || 0,
       total,
       status: payroll?.status || "open",
       payrollId: payroll?.id || null,
       markedPaidAt: payroll?.marked_paid_at || null,
+      qualifiedRatio: denominator > 0 ? `${payableSessions}/${denominator}` : "—",
+      qualifiedPct: denominator > 0 ? Math.round((payableSessions / denominator) * 100) : 100,
     };
   });
+
+  // Dados de auditoria
+  const auditPlanned = allApts.length;
+  const auditCompleted = allApts.filter((a) => a.status === "completed").length;
+  const auditMissed = allApts.filter((a) => a.status === "missed").length;
+  const auditCancelled = allApts.filter((a) => a.status === "cancelled").length;
+
+  // Receita planejada do mês (baseada nos appointments planejados)
+  const receitaPlanejadaMes = allApts.reduce((sum, a) => {
+    const sv = activePatients.find((p) => p.id === a.patient_id)?.session_value || 0;
+    return sum + sv;
+  }, 0);
+
+  // Taxa mês anterior
+  const prevCompleted = prevAllApts.filter((a) => a.status === "completed").length;
+  const prevPlanned = prevAllApts.length;
+  const prevMonthRate = prevPlanned > 0
+    ? Math.round((prevCompleted / prevPlanned) * 1000) / 10
+    : null;
+
+  // Quebra por motivo
+  const reasonCounts: Record<string, { category: string; count: number }> = {};
+  allApts
+    .filter((a) => a.status === "missed" || a.status === "cancelled")
+    .forEach((a) => {
+      const reason = a.reschedule_reason || "Sem motivo registrado";
+      const category = a.status === "missed" ? "Falta" : "Cancelamento";
+      const key = `${category}:${reason}`;
+      if (!reasonCounts[key]) reasonCounts[key] = { category, count: 0 };
+      reasonCounts[key].count++;
+    });
+
+  const reasonBreakdown = Object.entries(reasonCounts)
+    .map(([key, val]) => ({
+      reason: key.split(":").slice(1).join(":"),
+      category: val.category,
+      count: val.count,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  // Top pacientes com mais não-comparecimento
+  const absentByPatient: Record<string, { name: string; missed: number; cancelled: number }> = {};
+  allApts
+    .filter((a) => a.status === "missed" || a.status === "cancelled")
+    .forEach((a) => {
+      if (!absentByPatient[a.patient_id]) {
+        const name = (a.patients as unknown as { full_name: string })?.full_name || "—";
+        absentByPatient[a.patient_id] = { name, missed: 0, cancelled: 0 };
+      }
+      if (a.status === "missed") absentByPatient[a.patient_id].missed++;
+      else absentByPatient[a.patient_id].cancelled++;
+    });
+
+  const topAbsent = Object.entries(absentByPatient)
+    .map(([id, val]) => ({ id, ...val }))
+    .sort((a, b) => (b.missed + b.cancelled) - (a.missed + a.cancelled))
+    .slice(0, 5)
+    .filter((p) => p.missed + p.cancelled > 0);
 
   return (
     <FinanceiroContent
@@ -184,6 +276,17 @@ export default async function FinanceiroPage({
       }}
       billingRows={billingRows}
       payrollRows={payrollRows}
+      auditData={{
+        planned: auditPlanned,
+        completed: auditCompleted,
+        missed: auditMissed,
+        cancelled: auditCancelled,
+        receitaPlanejada: receitaPlanejadaMes,
+        receitaRealizada,
+        prevMonthRate,
+        reasonBreakdown,
+        topAbsent,
+      }}
     />
   );
 }

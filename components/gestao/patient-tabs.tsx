@@ -78,12 +78,25 @@ type EvolutionRow = {
   intercurrence_description: string | null;
 };
 
+type AppointmentRow = {
+  id: string;
+  scheduled_date: string;
+  scheduled_time: string | null;
+  status: string;
+  fisioName: string;
+  reschedule_reason: string | null;
+  reschedule_notes: string | null;
+  rescheduled_to: string | null;
+};
+
 type Props = {
   patient: Patient;
   medications: Medication[];
   evolutions: EvolutionRow[];
   exams: Exam[];
   reports?: MonthlyReport[];
+  appointments?: AppointmentRow[];
+  isGestao?: boolean;
 };
 
 // ═══════════════════════════════════════════════════════
@@ -96,13 +109,15 @@ export function PatientTabs({
   evolutions,
   exams: initExams,
   reports,
+  appointments,
+  isGestao,
 }: Props) {
   return (
     <Tabs defaultValue="dados">
       <TabsList variant="line">
         <TabsTrigger value="dados">Dados</TabsTrigger>
         <TabsTrigger value="medicamentos">Medicamentos</TabsTrigger>
-        <TabsTrigger value="evolucoes">Evoluções</TabsTrigger>
+        <TabsTrigger value="evolucoes">Histórico</TabsTrigger>
         <TabsTrigger value="exames">Exames</TabsTrigger>
         {reports && <TabsTrigger value="relatorios">Relatórios</TabsTrigger>}
       </TabsList>
@@ -114,7 +129,11 @@ export function PatientTabs({
         <MedicationsTab patientId={patient.id} initialMeds={initMeds} />
       </TabsContent>
       <TabsContent value="evolucoes">
-        <EvolutionsTab evolutions={evolutions} />
+        <EvolutionsTab
+          evolutions={evolutions}
+          appointments={appointments}
+          isGestao={isGestao}
+        />
       </TabsContent>
       <TabsContent value="exames">
         <ExamsTab patientId={patient.id} initialExams={initExams} />
@@ -495,7 +514,15 @@ function MedicationDialog({
 // ABA 3 — EVOLUÇÕES
 // ═══════════════════════════════════════════════════════
 
-function EvolutionsTab({ evolutions }: { evolutions: EvolutionRow[] }) {
+function EvolutionsTab({
+  evolutions,
+  appointments,
+  isGestao,
+}: {
+  evolutions: EvolutionRow[];
+  appointments?: AppointmentRow[];
+  isGestao?: boolean;
+}) {
   const [monthFilter, setMonthFilter] = useState("all");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [visibleCount, setVisibleCount] = useState(20);
@@ -523,6 +550,13 @@ function EvolutionsTab({ evolutions }: { evolutions: EvolutionRow[] }) {
       : evolutions.filter((e) => e.created_at.startsWith(monthFilter));
 
   const visible = filtered.slice(0, visibleCount);
+
+  // Appointments missed/cancelled (sem evolução)
+  const nonEvoAppts = (appointments || [])
+    .filter((a) => a.status === "missed" || a.status === "cancelled")
+    .filter((a) =>
+      monthFilter === "all" || a.scheduled_date.startsWith(monthFilter)
+    );
 
   function toggleExpand(id: string) {
     setExpandedIds((prev) => {
@@ -559,11 +593,66 @@ function EvolutionsTab({ evolutions }: { evolutions: EvolutionRow[] }) {
         ))}
       </select>
 
-      {filtered.length === 0 ? (
+      {/* Appointments missed/cancelled */}
+      {nonEvoAppts.length > 0 && (
+        <div className="space-y-2">
+          {nonEvoAppts.map((a) => (
+            <Card
+              key={a.id}
+              className={cn(
+                "opacity-70",
+                a.status === "missed"
+                  ? "border-l-4 border-l-ambar-aviso"
+                  : "border-l-4 border-l-cinza-texto/30"
+              )}
+            >
+              <CardContent className="pt-1 space-y-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-tinta-texto">
+                      {format(
+                        new Date(a.scheduled_date + "T12:00:00"),
+                        "dd/MM/yyyy (EEEE)",
+                        { locale: ptBR }
+                      )}
+                    </span>
+                    <Badge
+                      className={cn(
+                        "text-xs border-transparent",
+                        a.status === "missed"
+                          ? "bg-ambar-aviso/15 text-ambar-aviso"
+                          : "bg-cinza-texto/10 text-cinza-texto"
+                      )}
+                    >
+                      {a.status === "missed" ? "Falta" : "Cancelado"}
+                    </Badge>
+                  </div>
+                  <span className="text-xs text-cinza-texto">
+                    {a.scheduled_time?.slice(0, 5) || "—"} · {a.fisioName}
+                  </span>
+                </div>
+                {a.reschedule_reason && (
+                  <p className="text-xs text-ambar-aviso">
+                    {a.reschedule_reason}
+                    {a.reschedule_notes ? ` — ${a.reschedule_notes}` : ""}
+                  </p>
+                )}
+                {a.rescheduled_to && (
+                  <p className="text-xs text-verde-sucesso">
+                    Remarcado para outra data
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {filtered.length === 0 && nonEvoAppts.length === 0 ? (
         <p className="py-8 text-center text-sm text-cinza-texto">
-          Nenhuma evolução neste período.
+          Nenhum registro neste período.
         </p>
-      ) : (
+      ) : filtered.length > 0 ? (
         <div className="space-y-3">
           {visible.map((evo) => {
             const d = new Date(evo.created_at);
@@ -658,7 +747,7 @@ function EvolutionsTab({ evolutions }: { evolutions: EvolutionRow[] }) {
             </Button>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

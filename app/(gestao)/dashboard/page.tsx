@@ -148,6 +148,9 @@ export default async function DashboardPage() {
     (a) => a.status === "completed"
   ).length;
   const totalCount = allAppointmentsMonth.length;
+  const attendanceRate = totalCount > 0
+    ? Math.round((completedCount / totalCount) * 1000) / 10
+    : 0;
 
   // ── KPI 4: Pacientes ativos ──
   const totalActive = activePatients.length;
@@ -319,7 +322,7 @@ export default async function DashboardPage() {
         <KpiCard
           title="Atendimentos do mês"
           value={String(completedCount)}
-          subtitle={`de ${totalCount} previstos`}
+          subtitle={`de ${totalCount} previstos · ${attendanceRate}% comparecimento`}
           icon={Calendar}
           iconColor="text-laranja-ative"
         />

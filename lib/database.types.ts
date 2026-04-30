@@ -185,6 +185,9 @@ export type Database = {
           check_in_at: string | null;
           check_out_at: string | null;
           status: "scheduled" | "in_progress" | "completed" | "missed" | "cancelled";
+          reschedule_reason: string | null;
+          reschedule_notes: string | null;
+          rescheduled_to: string | null;
           created_at: string;
         };
         Insert: {
@@ -196,6 +199,9 @@ export type Database = {
           check_in_at?: string | null;
           check_out_at?: string | null;
           status?: "scheduled" | "in_progress" | "completed" | "missed" | "cancelled";
+          reschedule_reason?: string | null;
+          reschedule_notes?: string | null;
+          rescheduled_to?: string | null;
           created_at?: string;
         };
         Update: {
@@ -207,6 +213,9 @@ export type Database = {
           check_in_at?: string | null;
           check_out_at?: string | null;
           status?: "scheduled" | "in_progress" | "completed" | "missed" | "cancelled";
+          reschedule_reason?: string | null;
+          reschedule_notes?: string | null;
+          rescheduled_to?: string | null;
           created_at?: string;
         };
         Relationships: [

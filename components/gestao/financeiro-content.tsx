@@ -17,6 +17,7 @@ import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import { cn, formatCurrency } from "@/lib/utils";
 import { KpiCard } from "@/components/gestao/kpi-card";
+import { AuditSection } from "@/components/gestao/audit-section";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,6 +53,20 @@ type PayrollRow = {
   status: "open" | "paid";
   payrollId: string | null;
   markedPaidAt: string | null;
+  qualifiedRatio?: string;
+  qualifiedPct?: number;
+};
+
+type AuditData = {
+  planned: number;
+  completed: number;
+  missed: number;
+  cancelled: number;
+  receitaPlanejada: number;
+  receitaRealizada: number;
+  prevMonthRate: number | null;
+  reasonBreakdown: { reason: string; category: string; count: number }[];
+  topAbsent: { id: string; name: string; missed: number; cancelled: number }[];
 };
 
 type Props = {
@@ -68,6 +83,7 @@ type Props = {
   };
   billingRows: BillingRow[];
   payrollRows: PayrollRow[];
+  auditData?: AuditData;
 };
 
 export function FinanceiroContent({
@@ -76,12 +92,14 @@ export function FinanceiroContent({
   kpis,
   billingRows: initBilling,
   payrollRows: initPayroll,
+  auditData,
 }: Props) {
   const router = useRouter();
   const [billing, setBilling] = useState(initBilling);
   const [payroll, setPayroll] = useState(initPayroll);
   const [billingFilter, setBillingFilter] = useState("");
   const [billingSearch, setBillingSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"financeiro" | "auditoria">("financeiro");
 
   function handleMonthChange(mes: string) {
     router.push(`/financeiro?mes=${mes}`);
@@ -289,6 +307,40 @@ export function FinanceiroContent({
         />
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 rounded-lg bg-linha-suave/50 p-1">
+        <button
+          onClick={() => setActiveTab("financeiro")}
+          className={cn(
+            "flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors cursor-pointer",
+            activeTab === "financeiro"
+              ? "bg-white text-tinta-texto shadow-sm"
+              : "text-cinza-texto hover:text-tinta-texto"
+          )}
+        >
+          Cobrança e repasses
+        </button>
+        <button
+          onClick={() => setActiveTab("auditoria")}
+          className={cn(
+            "flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors cursor-pointer",
+            activeTab === "auditoria"
+              ? "bg-white text-tinta-texto shadow-sm"
+              : "text-cinza-texto hover:text-tinta-texto"
+          )}
+        >
+          Auditoria do mês
+        </button>
+      </div>
+
+      {/* Conteúdo da aba Auditoria */}
+      {activeTab === "auditoria" && auditData && (
+        <AuditSection data={auditData} />
+      )}
+
+      {/* Conteúdo da aba Financeiro */}
+      {activeTab === "financeiro" && <>
+
       {/* Tabela de cobranças */}
       <Card>
         <CardHeader>
@@ -420,6 +472,7 @@ export function FinanceiroContent({
                   <TableHead className="text-right">Sessões</TableHead>
                   <TableHead className="text-right">Valor/sessão</TableHead>
                   <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-center">% Qualif.</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
@@ -438,6 +491,17 @@ export function FinanceiroContent({
                     <TableCell className="text-right">{row.sessions}</TableCell>
                     <TableCell className="text-right">{formatCurrency(row.repasseValue)}</TableCell>
                     <TableCell className="text-right font-medium">{formatCurrency(row.total)}</TableCell>
+                    <TableCell className="text-center">
+                      {row.qualifiedRatio ? (
+                        <Badge className={cn("text-xs border-transparent",
+                          (row.qualifiedPct ?? 100) === 100
+                            ? "bg-verde-sucesso/15 text-verde-sucesso"
+                            : "bg-ambar-aviso/15 text-ambar-aviso"
+                        )}>
+                          {(row.qualifiedPct ?? 100) === 100 ? "100%" : row.qualifiedRatio}
+                        </Badge>
+                      ) : "—"}
+                    </TableCell>
                     <TableCell>
                       <Badge className={cn("text-xs border-transparent",
                         row.status === "paid" ? "bg-verde-sucesso/15 text-verde-sucesso" : "bg-ambar-aviso/15 text-ambar-aviso"
@@ -462,7 +526,7 @@ export function FinanceiroContent({
                 <TableRow>
                   <TableCell colSpan={3} className="font-medium">Total de repasses</TableCell>
                   <TableCell className="text-right font-semibold">{formatCurrency(totalRepasses)}</TableCell>
-                  <TableCell colSpan={2}></TableCell>
+                  <TableCell colSpan={3}></TableCell>
                 </TableRow>
               </TableFooter>
             </Table>
@@ -497,6 +561,7 @@ export function FinanceiroContent({
           </div>
         </CardContent>
       </Card>
+      </>}
     </div>
   );
 }

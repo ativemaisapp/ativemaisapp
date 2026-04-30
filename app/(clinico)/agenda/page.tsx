@@ -48,10 +48,11 @@ export default async function AgendaPage({
   const { data: appointments } = await supabase
     .from("appointments")
     .select(
-      "id, scheduled_date, scheduled_time, check_in_at, check_out_at, status, patient_id, patients!inner(full_name, address, weekly_frequency, phone)"
+      "id, scheduled_date, scheduled_time, check_in_at, check_out_at, status, reschedule_reason, reschedule_notes, rescheduled_to, patient_id, patients!inner(full_name, address, weekly_frequency, phone, status)"
     )
     .eq("fisio_id", user!.id)
     .eq("scheduled_date", selectedDate)
+    .neq("patients.status", "discharged")
     .order("scheduled_time");
 
   const appts = (appointments || []).map((a) => ({
@@ -60,6 +61,9 @@ export default async function AgendaPage({
     checkInAt: a.check_in_at,
     checkOutAt: a.check_out_at,
     status: a.status,
+    rescheduleReason: a.reschedule_reason,
+    rescheduleNotes: a.reschedule_notes,
+    rescheduledTo: a.rescheduled_to,
     patientId: a.patient_id,
     patientName: (a.patients as unknown as { full_name: string })?.full_name || "—",
     address: (a.patients as unknown as { address: string })?.address || "",
@@ -70,6 +74,8 @@ export default async function AgendaPage({
   const pendingCount = appts.filter(
     (a) => a.status === "scheduled" || a.status === "in_progress"
   ).length;
+  const missedCount = appts.filter((a) => a.status === "missed").length;
+  const cancelledCount = appts.filter((a) => a.status === "cancelled").length;
 
   return (
     <div className="mx-auto max-w-lg space-y-4">
@@ -88,6 +94,9 @@ export default async function AgendaPage({
         totalCount={appts.length}
         completedCount={completedCount}
         pendingCount={pendingCount}
+        missedCount={missedCount}
+        cancelledCount={cancelledCount}
+        fisioId={user!.id}
       />
     </div>
   );
