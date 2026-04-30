@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { UserX, XCircle, CalendarClock, AlertTriangle } from "lucide-react";
+import { UserX, XCircle, CalendarClock, AlertTriangle, Move } from "lucide-react";
 import { toast } from "sonner";
 
 import { createClient } from "@/lib/supabase/client";
@@ -44,10 +44,12 @@ export function AppointmentActions({
   appointment,
   fisioId,
   selectedDate,
+  onMove,
 }: {
   appointment: Appointment;
   fisioId: string;
   selectedDate: string;
+  onMove?: () => void;
 }) {
   const router = useRouter();
   const [action, setAction] = useState<ActionType>(null);
@@ -223,6 +225,15 @@ export function AppointmentActions({
           </svg>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {onMove && (
+            <DropdownMenuItem
+              onClick={onMove}
+              className="cursor-pointer"
+            >
+              <Move className="mr-2 h-4 w-4 text-verde-ative" />
+              Mover atendimento
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             onClick={() => openAction("missed")}
             className="cursor-pointer"

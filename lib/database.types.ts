@@ -188,6 +188,7 @@ export type Database = {
           reschedule_reason: string | null;
           reschedule_notes: string | null;
           rescheduled_to: string | null;
+          cascade_pair_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -202,6 +203,7 @@ export type Database = {
           reschedule_reason?: string | null;
           reschedule_notes?: string | null;
           rescheduled_to?: string | null;
+          cascade_pair_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -216,6 +218,7 @@ export type Database = {
           reschedule_reason?: string | null;
           reschedule_notes?: string | null;
           rescheduled_to?: string | null;
+          cascade_pair_id?: string | null;
           created_at?: string;
         };
         Relationships: [
