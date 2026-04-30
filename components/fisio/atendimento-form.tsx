@@ -115,37 +115,49 @@ export function AtendimentoForm({
   const [submitting, setSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [awaitingConfirm, setAwaitingConfirm] = useState(initialStatus === "scheduled");
+  const [cancellingCheckIn, setCancellingCheckIn] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionRef = useRef<unknown>(null);
 
-  // ── Check-in automático ──
-  useEffect(() => {
-    if (initialStatus === "scheduled") {
-      const now = new Date().toISOString();
-      setCheckInTime(now);
-      supabase
-        .from("appointments")
-        .update({ status: "in_progress", check_in_at: now })
-        .eq("id", appointmentId)
-        .then(() => {
-          // Criar evolução rascunho
-          supabase
-            .from("evolutions")
-            .insert({
-              appointment_id: appointmentId,
-              patient_id: patientId,
-              fisio_id: fisioId,
-            })
-            .select("id")
-            .single()
-            .then(({ data }) => {
-              if (data) setEvolutionId(data.id);
-            });
-        });
+  // ── Check-in sob demanda (não mais automático) ──
+  async function doCheckIn() {
+    const now = new Date().toISOString();
+    setCheckInTime(now);
+    setAwaitingConfirm(false);
+    await supabase
+      .from("appointments")
+      .update({ status: "in_progress", check_in_at: now })
+      .eq("id", appointmentId);
+    const { data } = await supabase
+      .from("evolutions")
+      .insert({
+        appointment_id: appointmentId,
+        patient_id: patientId,
+        fisio_id: fisioId,
+      })
+      .select("id")
+      .single();
+    if (data) setEvolutionId(data.id);
+  }
+
+  async function cancelCheckIn() {
+    setCancellingCheckIn(true);
+    // Deletar evolução rascunho
+    if (evolutionId) {
+      await supabase.from("evolutions").delete().eq("id", evolutionId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Reverter appointment para scheduled
+    await supabase
+      .from("appointments")
+      .update({ status: "scheduled", check_in_at: null })
+      .eq("id", appointmentId);
+    setCancellingCheckIn(false);
+    toast("Check-in cancelado. Voltando para agenda.");
+    router.push("/agenda");
+    router.refresh();
+  }
 
   // ── Cronômetro ──
   useEffect(() => {
@@ -319,6 +331,38 @@ export function AtendimentoForm({
       })
     : "—";
 
+  // ── Tela de confirmação antes do check-in ──
+  if (awaitingConfirm) {
+    return (
+      <div className="mx-auto max-w-lg space-y-6 py-12">
+        <button
+          onClick={() => router.push("/agenda")}
+          className="flex items-center gap-1 text-sm text-cinza-texto hover:text-tinta-texto cursor-pointer"
+        >
+          <ArrowLeft className="h-4 w-4" /> Voltar para agenda
+        </button>
+        <div className="text-center space-y-4">
+          <HeartPulse className="mx-auto h-16 w-16 text-verde-ative" />
+          <h1 className="text-2xl font-semibold text-tinta-texto">
+            {patientName}
+          </h1>
+          <p className="text-cinza-texto">
+            Deseja iniciar o atendimento agora?
+          </p>
+          <p className="text-xs text-cinza-texto">
+            O check-in será registrado automaticamente com data e hora atuais.
+          </p>
+          <Button
+            onClick={doCheckIn}
+            className="h-14 w-full bg-verde-ative hover:bg-verde-ative/90 text-white text-lg cursor-pointer"
+          >
+            Confirmar e iniciar atendimento
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-lg space-y-4 pb-24">
       {/* Header */}
@@ -339,13 +383,25 @@ export function AtendimentoForm({
         </div>
       </div>
 
-      <div>
-        <h1 className="text-xl font-semibold text-tinta-texto">
-          {patientName}
-        </h1>
-        <p className="text-xs text-cinza-texto">
-          Em atendimento desde {checkinTimeStr}
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-tinta-texto">
+            {patientName}
+          </h1>
+          <p className="text-xs text-cinza-texto">
+            Em atendimento desde {checkinTimeStr}
+          </p>
+        </div>
+        {/* Botão cancelar check-in (só se nenhum dado foi preenchido) */}
+        {!bpInitial && !hrInitial && conducts.length === 0 && (
+          <button
+            onClick={cancelCheckIn}
+            disabled={cancellingCheckIn}
+            className="text-xs text-vermelho-alerta hover:underline cursor-pointer"
+          >
+            {cancellingCheckIn ? "Cancelando..." : "Cancelar check-in"}
+          </button>
+        )}
       </div>
 
       {/* SEÇÃO 1 — Sinais vitais entrada */}
