@@ -58,14 +58,18 @@ export default async function DashboardPage() {
   // ── Query de appointments do dia (para card de atendimentos) ──
   let myTodayTotal = 0;
   let myTodayConcluidos = 0;
+  let myTodayFaltas = 0;
   if (atendePacientes) {
     const { data: myAppts } = await supabase
       .from("appointments")
-      .select("status")
+      .select("status, patients!inner(status)")
       .eq("fisio_id", user!.id)
-      .eq("scheduled_date", format(spNow, "yyyy-MM-dd"));
-    myTodayTotal = myAppts?.length || 0;
-    myTodayConcluidos = myAppts?.filter((a) => a.status === "completed").length || 0;
+      .eq("scheduled_date", format(spNow, "yyyy-MM-dd"))
+      .neq("patients.status", "discharged");
+    const realizaveis = myAppts?.filter((a) => a.status !== "cancelled") || [];
+    myTodayTotal = realizaveis.length;
+    myTodayConcluidos = realizaveis.filter((a) => a.status === "completed").length;
+    myTodayFaltas = realizaveis.filter((a) => a.status === "missed").length;
   }
 
   // ── 5 queries em paralelo ──
@@ -288,8 +292,16 @@ export default async function DashboardPage() {
                 </p>
                 <p className="text-sm text-cinza-texto">
                   {myTodayTotal === 0
-                    ? "Você não tem atendimentos hoje."
-                    : `Você tem ${myTodayTotal} atendimento${myTodayTotal > 1 ? "s" : ""} hoje. ${myTodayConcluidos} já concluído${myTodayConcluidos !== 1 ? "s" : ""}.`}
+                    ? "Voce nao tem atendimentos hoje."
+                    : myTodayConcluidos + myTodayFaltas === myTodayTotal
+                      ? myTodayFaltas === 0
+                        ? `Todos os ${myTodayTotal} atendimentos de hoje foram concluidos.`
+                        : `Atendimentos de hoje finalizados. ${myTodayConcluidos} concluido${myTodayConcluidos !== 1 ? "s" : ""}, ${myTodayFaltas} falta${myTodayFaltas !== 1 ? "s" : ""}.`
+                      : myTodayConcluidos === 0 && myTodayFaltas === 0
+                        ? `Voce tem ${myTodayTotal} atendimento${myTodayTotal > 1 ? "s" : ""} hoje.`
+                        : myTodayFaltas > 0
+                          ? `Voce tem ${myTodayTotal} atendimento${myTodayTotal > 1 ? "s" : ""} hoje. ${myTodayConcluidos} concluido${myTodayConcluidos !== 1 ? "s" : ""}, ${myTodayFaltas} falta${myTodayFaltas !== 1 ? "s" : ""}.`
+                          : `Voce tem ${myTodayTotal} atendimento${myTodayTotal > 1 ? "s" : ""} hoje. ${myTodayConcluidos} ja concluido${myTodayConcluidos !== 1 ? "s" : ""}.`}
                 </p>
               </div>
             </div>

@@ -78,6 +78,11 @@ export default async function GestaoLayout({
             avatar_url: profile.avatar_url,
             email: profile.email,
           }}
+          sidebarProps={{
+            badges: { pacientes: patientsCount, financeiro: billingOpenCount },
+            atendePacientes,
+            agendaPendentes,
+          }}
         />
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>

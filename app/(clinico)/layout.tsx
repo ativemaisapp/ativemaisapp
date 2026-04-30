@@ -77,6 +77,14 @@ export default async function ClinicoLayout({
               avatar_url: profile.avatar_url,
               email: profile.email,
             }}
+            sidebarProps={{
+              badges: {
+                pacientes: patientsCountRes.count || 0,
+                financeiro: billingOpenRes.count || 0,
+              },
+              atendePacientes: true,
+              agendaPendentes: agendaPendingRes.count || 0,
+            }}
           />
           <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
         </div>

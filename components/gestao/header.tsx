@@ -43,9 +43,14 @@ type HeaderProps = {
     avatar_url: string | null;
     email: string | null;
   };
+  sidebarProps?: {
+    badges?: { pacientes?: number; financeiro?: number };
+    atendePacientes?: boolean;
+    agendaPendentes?: number;
+  };
 };
 
-export function Header({ profile }: HeaderProps) {
+export function Header({ profile, sidebarProps }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -73,7 +78,12 @@ export function Header({ profile }: HeaderProps) {
             <div className="flex items-center justify-center border-b border-linha-suave p-4">
               <LogoAtive size="sm" />
             </div>
-            <SidebarNav onNavigate={() => setSidebarOpen(false)} />
+            <SidebarNav
+              onNavigate={() => setSidebarOpen(false)}
+              badges={sidebarProps?.badges}
+              atendePacientes={sidebarProps?.atendePacientes}
+              agendaPendentes={sidebarProps?.agendaPendentes}
+            />
           </SheetContent>
         </Sheet>
 
