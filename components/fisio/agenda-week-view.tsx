@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Move } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
@@ -19,8 +19,17 @@ import {
   getWeekStart,
   getWeekDays,
   formatDateISO,
+  normalizeTime,
 } from "@/lib/agenda-rules";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { CascadeRescheduleModal } from "@/components/fisio/cascade-reschedule-modal";
 
 type Props = {
@@ -200,14 +209,22 @@ function DesktopWeekView({
     targetDate: string;
     targetTime: string;
   } | null>(null);
+  const [actionAppt, setActionAppt] = useState<AgendaAppointment | null>(null);
+  const [moveModal, setMoveModal] = useState<AgendaAppointment | null>(null);
+  const [moveDate, setMoveDate] = useState("");
+  const [moveTime, setMoveTime] = useState("");
 
   const todayStr = formatDateISO(new Date());
 
-  // Build lookup: "date|time" -> appointment
-  const apptMap = new Map<string, AgendaAppointment>();
+  // Build lookup: "date|time" -> appointments
+  const apptMap = new Map<string, AgendaAppointment[]>();
   for (const a of appointments) {
-    if (a.scheduledTime && a.status !== "cancelled") {
-      apptMap.set(`${a.scheduledDate}|${a.scheduledTime.slice(0, 5)}`, a);
+    const t = normalizeTime(a.scheduledTime);
+    if (t && a.status !== "cancelled") {
+      const key = `${a.scheduledDate}|${t}`;
+      const arr = apptMap.get(key) || [];
+      arr.push(a);
+      apptMap.set(key, arr);
     }
   }
 
@@ -218,14 +235,61 @@ function DesktopWeekView({
   );
   const [sundayExpanded, setSundayExpanded] = useState(false);
 
-  async function handleCellClick(
-    date: string,
-    time: string,
-    existingAppt?: AgendaAppointment
-  ) {
-    if (existingAppt) {
-      router.push(`/atendimento/${existingAppt.id}`);
+  function openActionDialog(appt: AgendaAppointment) {
+    setActionAppt(appt);
+  }
+
+  function openMoveFromAction() {
+    if (!actionAppt) return;
+    setMoveModal(actionAppt);
+    setMoveDate(actionAppt.scheduledDate);
+    setMoveTime(normalizeTime(actionAppt.scheduledTime) || "08:00");
+    setActionAppt(null);
+  }
+
+  function goToApptFromAction() {
+    if (!actionAppt) return;
+    router.push(`/atendimento/${actionAppt.id}`);
+    setActionAppt(null);
+  }
+
+  async function handleMoveConfirm() {
+    if (!moveModal || !moveDate || !moveTime) return;
+    const appt = moveModal;
+    setMoveModal(null);
+
+    if (!isValidTimeSlot(moveTime)) {
+      toast.error("Horario fora da janela permitida (06:00-20:30).");
+      return;
     }
+    if (!isNotPastDate(moveDate)) {
+      toast.error("Nao e possivel mover para datas passadas.");
+      return;
+    }
+
+    const conflict = detectConflict(appointments, moveDate, moveTime, appt.id);
+    if (conflict) {
+      setCascadeModal({
+        dragged: appt,
+        conflict,
+        targetDate: moveDate,
+        targetTime: moveTime,
+      });
+      return;
+    }
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("appointments")
+      .update({ scheduled_date: moveDate, scheduled_time: moveTime })
+      .eq("id", appt.id);
+
+    if (error) {
+      toast.error("Erro ao mover: " + error.message);
+      return;
+    }
+    toast.success(`Atendimento movido para ${moveDate.split("-").reverse().join("/")} ${moveTime}`);
+    router.refresh();
   }
 
   return (
@@ -300,7 +364,7 @@ function DesktopWeekView({
                 {days.map((day, i) => {
                   const dateStr = formatDateISO(day);
                   const key = `${dateStr}|${slot}`;
-                  const appt = apptMap.get(key);
+                  const slotAppts = apptMap.get(key) || [];
                   const isToday = dateStr === todayStr;
                   const isSunday = i === 6;
 
@@ -325,11 +389,10 @@ function DesktopWeekView({
                         isToday && "bg-verde-ative/5"
                       )}
                     >
-                      {appt ? (
+                      {slotAppts.map((appt) => (
                         <button
-                          onClick={() =>
-                            handleCellClick(dateStr, slot, appt)
-                          }
+                          key={appt.id}
+                          onClick={() => openActionDialog(appt)}
                           className={cn(
                             "w-full rounded px-1 py-0.5 text-left text-[11px] font-medium leading-tight truncate cursor-pointer shadow-sm",
                             STATUS_COLORS[appt.status] || "bg-cinza-texto/20"
@@ -338,7 +401,7 @@ function DesktopWeekView({
                         >
                           {appt.patientName.split(" ")[0]}
                         </button>
-                      ) : null}
+                      ))}
                     </td>
                   );
                 })}
@@ -347,6 +410,101 @@ function DesktopWeekView({
           </tbody>
         </table>
       </div>
+
+      {/* Action dialog — Ver ou Mover */}
+      <Dialog
+        open={actionAppt !== null}
+        onOpenChange={(o) => !o && setActionAppt(null)}
+      >
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-base">
+              {actionAppt?.patientName}
+            </DialogTitle>
+            <DialogDescription>
+              {actionAppt?.scheduledDate.split("-").reverse().join("/")}{" "}
+              as {normalizeTime(actionAppt?.scheduledTime)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="outline"
+              onClick={goToApptFromAction}
+              className="justify-start gap-2 cursor-pointer"
+            >
+              <Eye className="h-4 w-4" /> Ver atendimento
+            </Button>
+            {actionAppt &&
+              isDraggable(actionAppt.status) &&
+              (actionAppt.fisioId === fisioId || userRole === "gestao") && (
+                <Button
+                  variant="outline"
+                  onClick={openMoveFromAction}
+                  className="justify-start gap-2 cursor-pointer"
+                >
+                  <Move className="h-4 w-4" /> Mover atendimento
+                </Button>
+              )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move dialog */}
+      <Dialog
+        open={moveModal !== null}
+        onOpenChange={(o) => !o && setMoveModal(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mover atendimento</DialogTitle>
+            <DialogDescription>
+              {moveModal?.patientName} —{" "}
+              {moveModal?.scheduledDate.split("-").reverse().join("/")}{" "}
+              {normalizeTime(moveModal?.scheduledTime)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium text-tinta-texto">
+                Nova data
+              </label>
+              <input
+                type="date"
+                value={moveDate}
+                onChange={(e) => setMoveDate(e.target.value)}
+                className="mt-1 flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-tinta-texto">
+                Novo horario
+              </label>
+              <input
+                type="time"
+                value={moveTime}
+                onChange={(e) => setMoveTime(e.target.value)}
+                className="mt-1 flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setMoveModal(null)}
+              className="cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleMoveConfirm}
+              disabled={!moveDate || !moveTime}
+              className="bg-verde-ative hover:bg-verde-ative/90 text-white cursor-pointer"
+            >
+              Confirmar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {cascadeModal && (
         <CascadeRescheduleModal
@@ -398,6 +556,18 @@ function MobileWeekView({
     (a) => a.scheduledDate === currentDateStr && a.status !== "cancelled"
   );
 
+  // Action & move state
+  const [actionAppt, setActionAppt] = useState<AgendaAppointment | null>(null);
+  const [moveModal, setMoveModal] = useState<AgendaAppointment | null>(null);
+  const [moveDate, setMoveDate] = useState("");
+  const [moveTime, setMoveTime] = useState("");
+  const [cascadeModal, setCascadeModal] = useState<{
+    dragged: AgendaAppointment;
+    conflict: AgendaAppointment;
+    targetDate: string;
+    targetTime: string;
+  } | null>(null);
+
   // Swipe handling
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -428,11 +598,67 @@ function MobileWeekView({
     if (currentDayIndex < 6) setCurrentDayIndex((i) => i + 1);
   }
 
+  function openMoveFromAction() {
+    if (!actionAppt) return;
+    setMoveModal(actionAppt);
+    setMoveDate(actionAppt.scheduledDate);
+    setMoveTime(normalizeTime(actionAppt.scheduledTime) || "08:00");
+    setActionAppt(null);
+  }
+
+  function goToApptFromAction() {
+    if (!actionAppt) return;
+    router.push(`/atendimento/${actionAppt.id}`);
+    setActionAppt(null);
+  }
+
+  async function handleMoveConfirm() {
+    if (!moveModal || !moveDate || !moveTime) return;
+    const appt = moveModal;
+    setMoveModal(null);
+
+    if (!isValidTimeSlot(moveTime)) {
+      toast.error("Horario fora da janela permitida (06:00-20:30).");
+      return;
+    }
+    if (!isNotPastDate(moveDate)) {
+      toast.error("Nao e possivel mover para datas passadas.");
+      return;
+    }
+
+    const conflict = detectConflict(appointments, moveDate, moveTime, appt.id);
+    if (conflict) {
+      setCascadeModal({
+        dragged: appt,
+        conflict,
+        targetDate: moveDate,
+        targetTime: moveTime,
+      });
+      return;
+    }
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("appointments")
+      .update({ scheduled_date: moveDate, scheduled_time: moveTime })
+      .eq("id", appt.id);
+
+    if (error) {
+      toast.error("Erro ao mover: " + error.message);
+      return;
+    }
+    toast.success(`Atendimento movido para ${moveDate.split("-").reverse().join("/")} ${moveTime}`);
+    router.refresh();
+  }
+
   // Build appointment map for this day
-  const apptByTime = new Map<string, AgendaAppointment>();
+  const apptByTime = new Map<string, AgendaAppointment[]>();
   for (const a of dayAppointments) {
-    if (a.scheduledTime) {
-      apptByTime.set(a.scheduledTime.slice(0, 5), a);
+    const t = normalizeTime(a.scheduledTime);
+    if (t) {
+      const arr = apptByTime.get(t) || [];
+      arr.push(a);
+      apptByTime.set(t, arr);
     }
   }
 
@@ -505,13 +731,13 @@ function MobileWeekView({
         className="space-y-1"
       >
         {timeSlots.map((slot) => {
-          const appt = apptByTime.get(slot);
+          const slotAppts = apptByTime.get(slot) || [];
 
-          if (appt) {
-            return (
+          if (slotAppts.length > 0) {
+            return slotAppts.map((appt) => (
               <button
-                key={slot}
-                onClick={() => router.push(`/atendimento/${appt.id}`)}
+                key={appt.id}
+                onClick={() => setActionAppt(appt)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left shadow-sm cursor-pointer",
                   STATUS_COLORS[appt.status] || "bg-cinza-texto/20"
@@ -524,7 +750,7 @@ function MobileWeekView({
                   {appt.patientName}
                 </span>
               </button>
-            );
+            ));
           }
 
           return (
@@ -542,6 +768,113 @@ function MobileWeekView({
           );
         })}
       </div>
+
+      {/* Action dialog — Ver ou Mover */}
+      <Dialog
+        open={actionAppt !== null}
+        onOpenChange={(o) => !o && setActionAppt(null)}
+      >
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-base">
+              {actionAppt?.patientName}
+            </DialogTitle>
+            <DialogDescription>
+              {actionAppt?.scheduledDate.split("-").reverse().join("/")}{" "}
+              as {normalizeTime(actionAppt?.scheduledTime)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="outline"
+              onClick={goToApptFromAction}
+              className="justify-start gap-2 cursor-pointer"
+            >
+              <Eye className="h-4 w-4" /> Ver atendimento
+            </Button>
+            {actionAppt &&
+              isDraggable(actionAppt.status) &&
+              (actionAppt.fisioId === fisioId || userRole === "gestao") && (
+                <Button
+                  variant="outline"
+                  onClick={openMoveFromAction}
+                  className="justify-start gap-2 cursor-pointer"
+                >
+                  <Move className="h-4 w-4" /> Mover atendimento
+                </Button>
+              )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move dialog */}
+      <Dialog
+        open={moveModal !== null}
+        onOpenChange={(o) => !o && setMoveModal(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mover atendimento</DialogTitle>
+            <DialogDescription>
+              {moveModal?.patientName} —{" "}
+              {moveModal?.scheduledDate.split("-").reverse().join("/")}{" "}
+              {normalizeTime(moveModal?.scheduledTime)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium text-tinta-texto">
+                Nova data
+              </label>
+              <input
+                type="date"
+                value={moveDate}
+                onChange={(e) => setMoveDate(e.target.value)}
+                className="mt-1 flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-tinta-texto">
+                Novo horario
+              </label>
+              <input
+                type="time"
+                value={moveTime}
+                onChange={(e) => setMoveTime(e.target.value)}
+                className="mt-1 flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setMoveModal(null)}
+              className="cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleMoveConfirm}
+              disabled={!moveDate || !moveTime}
+              className="bg-verde-ative hover:bg-verde-ative/90 text-white cursor-pointer"
+            >
+              Confirmar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {cascadeModal && (
+        <CascadeRescheduleModal
+          open={true}
+          onClose={() => setCascadeModal(null)}
+          draggedAppt={cascadeModal.dragged}
+          conflictAppt={cascadeModal.conflict}
+          targetDate={cascadeModal.targetDate}
+          targetTime={cascadeModal.targetTime}
+          allAppointments={appointments}
+        />
+      )}
     </div>
   );
 }

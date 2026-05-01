@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import {
   DndContext,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragOverlay,
@@ -33,6 +34,7 @@ import {
   isValidTimeSlot,
   isNotPastDate,
   generateTimeSlots,
+  normalizeTime,
 } from "@/lib/agenda-rules";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,19 +82,25 @@ export function AgendaDayView({
   const [moveTime, setMoveTime] = useState("");
 
   const pointerSensor = useSensor(PointerSensor, {
-    activationConstraint: { delay: 500, tolerance: 5 },
+    activationConstraint: { delay: 300, tolerance: 5 },
   });
-  const sensors = useSensors(pointerSensor);
+  const touchSensor = useSensor(TouchSensor, {
+    activationConstraint: { delay: 300, tolerance: 8 },
+  });
+  const sensors = useSensors(pointerSensor, touchSensor);
 
   const activeAppt = activeId
     ? appointments.find((a) => a.id === activeId)
     : null;
 
-  // Map time -> appointment for quick lookup
-  const apptByTime = new Map<string, AgendaAppointment>();
+  // Map time -> appointments for quick lookup (supports multiple per slot)
+  const apptByTime = new Map<string, AgendaAppointment[]>();
   for (const a of appointments) {
-    if (a.scheduledTime && a.status !== "cancelled") {
-      apptByTime.set(a.scheduledTime.slice(0, 5), a);
+    const t = normalizeTime(a.scheduledTime);
+    if (t && a.status !== "cancelled") {
+      const arr = apptByTime.get(t) || [];
+      arr.push(a);
+      apptByTime.set(t, arr);
     }
   }
 
@@ -122,7 +130,7 @@ export function AgendaDayView({
     if (!appt) return;
 
     const targetTime = String(over.id);
-    if (targetTime === appt.scheduledTime?.slice(0, 5)) return;
+    if (targetTime === normalizeTime(appt.scheduledTime)) return;
 
     executeMoveLogic(appt, selectedDate, targetTime);
   }
@@ -177,7 +185,7 @@ export function AgendaDayView({
   function openMoveModal(appt: AgendaAppointment) {
     setMoveModal(appt);
     setMoveDate(appt.scheduledDate);
-    setMoveTime(appt.scheduledTime?.slice(0, 5) || "08:00");
+    setMoveTime(normalizeTime(appt.scheduledTime) || "08:00");
   }
 
   function handleMoveConfirm() {
@@ -196,22 +204,25 @@ export function AgendaDayView({
       >
         <div className="space-y-1.5">
           {timeSlots.map((slot) => {
-            const appt = apptByTime.get(slot);
+            const slotAppts = apptByTime.get(slot) || [];
             return (
               <SlotDropZone
                 key={slot}
                 time={slot}
                 isActive={activeId !== null}
               >
-                {appt ? (
-                  <DraggableCard
-                    appt={appt}
-                    selectedDate={selectedDate}
-                    fisioId={fisioId}
-                    userRole={userRole}
-                    onOpenMove={openMoveModal}
-                  />
-                ) : null}
+                {slotAppts.length > 0
+                  ? slotAppts.map((appt) => (
+                      <DraggableCard
+                        key={appt.id}
+                        appt={appt}
+                        selectedDate={selectedDate}
+                        fisioId={fisioId}
+                        userRole={userRole}
+                        onOpenMove={openMoveModal}
+                      />
+                    ))
+                  : null}
               </SlotDropZone>
             );
           })}
@@ -224,7 +235,7 @@ export function AgendaDayView({
                 {activeAppt.patientName}
               </p>
               <p className="text-sm text-cinza-texto">
-                {activeAppt.scheduledTime?.slice(0, 5)}
+                {normalizeTime(activeAppt.scheduledTime)}
               </p>
             </div>
           )}
@@ -253,7 +264,7 @@ export function AgendaDayView({
             <DialogDescription>
               {moveModal?.patientName} —{" "}
               {moveModal?.scheduledDate.split("-").reverse().join("/")}{" "}
-              {moveModal?.scheduledTime?.slice(0, 5)}
+              {normalizeTime(moveModal?.scheduledTime)}
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3">
@@ -370,7 +381,7 @@ function DraggableCard({
     disabled: !canDrag || !canControl,
   });
 
-  const time = appt.scheduledTime?.slice(0, 5) || "—";
+  const time = normalizeTime(appt.scheduledTime) || "—";
 
   // ── Completed ──
   if (appt.status === "completed") {

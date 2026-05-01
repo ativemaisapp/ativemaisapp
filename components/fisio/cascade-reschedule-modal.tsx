@@ -14,6 +14,7 @@ import {
   getWeekStart,
   getWeekDays,
   formatDateISO,
+  normalizeTime,
 } from "@/lib/agenda-rules";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,7 +67,7 @@ export function CascadeRescheduleModal({
   }
 
   // Slot que acabou de ser liberado pelo arrastado
-  const freedSlot = draggedAppt.scheduledTime?.slice(0, 5) || "";
+  const freedSlot = normalizeTime(draggedAppt.scheduledTime);
   const freedDate = draggedAppt.scheduledDate;
 
   // Slots livres do dia do conflito (incluindo o que vai ser liberado pelo arrastado)
@@ -377,7 +378,7 @@ export function CascadeRescheduleModal({
                   </p>
                   <p className="text-cinza-texto">
                     {draggedAppt.scheduledDate.split("-").reverse().join("/")}{" "}
-                    {draggedAppt.scheduledTime?.slice(0, 5)} →{" "}
+                    {normalizeTime(draggedAppt.scheduledTime)} →{" "}
                     {targetDate.split("-").reverse().join("/")}{" "}
                     {targetTime}
                   </p>
@@ -392,7 +393,7 @@ export function CascadeRescheduleModal({
                   </p>
                   <p className="text-cinza-texto">
                     {conflictAppt.scheduledDate.split("-").reverse().join("/")}{" "}
-                    {conflictAppt.scheduledTime?.slice(0, 5)} →{" "}
+                    {normalizeTime(conflictAppt.scheduledTime)} →{" "}
                     {selectedDate.split("-").reverse().join("/")}{" "}
                     {selectedTime}
                   </p>

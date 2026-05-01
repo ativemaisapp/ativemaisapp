@@ -27,21 +27,27 @@ export function detectConflict(
   targetTime: string,
   excludeId: string
 ): AgendaAppointment | null {
+  const targetNorm = normalizeTime(targetTime);
   return (
     appointments.find(
       (a) =>
         a.id !== excludeId &&
         a.scheduledDate === targetDate &&
-        a.scheduledTime?.slice(0, 5) === targetTime.slice(0, 5) &&
+        normalizeTime(a.scheduledTime) === targetNorm &&
         (a.status === "scheduled" || a.status === "in_progress")
     ) ?? null
   );
 }
 
-/** Valida se horário está dentro da janela 06:00-21:00 */
+/** Valida se horário está dentro da janela 06:00-20:30 */
 export function isValidTimeSlot(time: string): boolean {
-  const hour = parseInt(time.slice(0, 2), 10);
-  return hour >= 6 && hour <= 20;
+  const n = normalizeTime(time);
+  if (!n) return false;
+  const hour = parseInt(n.slice(0, 2), 10);
+  const min = parseInt(n.slice(3, 5), 10);
+  if (hour < 6 || hour > 20) return false;
+  if (hour === 20 && min > 30) return false;
+  return min === 0 || min === 30;
 }
 
 /** Valida se data não é passada */
@@ -53,11 +59,23 @@ export function isNotPastDate(dateStr: string): boolean {
   return dateStr >= today;
 }
 
-/** Gera slots de horário das 06:00 às 20:00 (última sessão começa 20:00, termina 21:00) */
+/** Normaliza qualquer formato de time para HH:MM */
+export function normalizeTime(t: string | null | undefined): string {
+  if (!t) return "";
+  // Extrai HH:MM de formatos como "08:30:00", "8:30", "08:30:00+00"
+  const match = t.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+/** Gera slots de horário das 06:00 às 20:30 em intervalos de 30 min */
 export function generateTimeSlots(): string[] {
   const slots: string[] = [];
   for (let h = 6; h <= 20; h++) {
     slots.push(`${String(h).padStart(2, "0")}:00`);
+    if (h < 20) {
+      slots.push(`${String(h).padStart(2, "0")}:30`);
+    }
   }
   return slots;
 }
@@ -99,7 +117,7 @@ export function getFreeSlots(
           a.scheduledDate === date &&
           (a.status === "scheduled" || a.status === "in_progress")
       )
-      .map((a) => a.scheduledTime?.slice(0, 5))
+      .map((a) => normalizeTime(a.scheduledTime))
   );
   return allSlots.filter((s) => !occupied.has(s));
 }

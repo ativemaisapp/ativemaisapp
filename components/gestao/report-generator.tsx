@@ -207,9 +207,11 @@ export function ReportGenerator({
 
       const phone = familyPhone.replace(/\D/g, "");
       const waUrl = `https://wa.me/55${phone}?text=${encodeURIComponent(message)}`;
-      window.open(waUrl, "_blank");
 
-      toast.success("Link de WhatsApp gerado");
+      toast.success("Abrindo WhatsApp...");
+      setTimeout(() => {
+        window.location.href = waUrl;
+      }, 800);
     } catch {
       toast.error("Erro ao preparar envio");
     } finally {

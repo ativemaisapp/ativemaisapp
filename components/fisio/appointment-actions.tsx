@@ -11,6 +11,7 @@ import {
   CANCELLED_REASONS,
   RESCHEDULE_REASONS,
 } from "@/lib/evolution-rules";
+import { normalizeTime } from "@/lib/agenda-rules";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -69,7 +70,7 @@ export function AppointmentActions({
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       setNewDate(tomorrow.toISOString().split("T")[0]);
-      setNewTime(appointment.scheduledTime?.slice(0, 5) || "08:00");
+      setNewTime(normalizeTime(appointment.scheduledTime) || "08:00");
     }
   }
 
@@ -205,7 +206,7 @@ export function AppointmentActions({
     router.refresh();
   }
 
-  const time = appointment.scheduledTime?.slice(0, 5) || "—";
+  const time = normalizeTime(appointment.scheduledTime) || "—";
   const dateFormatted = selectedDate.split("-").reverse().join("/");
 
   return (
