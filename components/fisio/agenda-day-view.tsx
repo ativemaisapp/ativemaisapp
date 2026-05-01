@@ -267,7 +267,7 @@ export function AgendaDayView({
               {normalizeTime(moveModal?.scheduledTime)}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="text-sm font-medium text-tinta-texto">
                 Nova data

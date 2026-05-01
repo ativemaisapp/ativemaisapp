@@ -157,13 +157,6 @@ export function ReportGenerator({
         upsert: true,
       });
 
-      // Gerar URL assinada (7 dias)
-      const { data: urlData } = await supabase.storage
-        .from(BUCKET_REPORTS)
-        .createSignedUrl(path, 7 * 24 * 60 * 60);
-
-      const signedUrl = urlData?.signedUrl || "";
-
       // Salvar registro em monthly_reports
       const { data: existing } = await supabase
         .from("monthly_reports")
@@ -180,14 +173,24 @@ export function ReportGenerator({
         generated_at: new Date().toISOString(),
       };
 
+      let reportId: string;
       if (existing) {
         await supabase
           .from("monthly_reports")
           .update(reportData)
           .eq("id", existing.id);
+        reportId = existing.id;
       } else {
-        await supabase.from("monthly_reports").insert(reportData);
+        const { data: inserted } = await supabase
+          .from("monthly_reports")
+          .insert(reportData)
+          .select("id")
+          .single();
+        reportId = inserted?.id || "";
       }
+
+      // Link curto via redirect API
+      const shortUrl = `${window.location.origin}/api/r/${reportId}`;
 
       // Montar mensagem WhatsApp
       const firstName = patientName.split(" ")[0];
@@ -200,7 +203,7 @@ export function ReportGenerator({
         `Foram ${summary?.completed || 0} atendimentos realizados pela equipe Ative+60.`,
         `Qualquer dúvida estou à disposição.`,
         ``,
-        `Relatório completo: ${signedUrl}`,
+        `Relatório: ${shortUrl}`,
         ``,
         `— ${userName.split(" ")[0]}`,
       ].join("\n");
