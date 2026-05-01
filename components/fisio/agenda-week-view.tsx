@@ -522,8 +522,17 @@ function DesktopWeekView({
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MOBILE WEEK VIEW — one day at a time with swipe
+// MOBILE WEEK VIEW — vertical list, full week visible
 // ═══════════════════════════════════════════════════════════════
+
+const STATUS_BORDER: Record<string, string> = {
+  scheduled: "border-l-laranja-ative",
+  in_progress: "border-l-ambar-aviso",
+  completed: "border-l-verde-sucesso",
+  missed: "border-l-vermelho-alerta",
+  cancelled: "border-l-cinza-texto/40",
+};
+
 function MobileWeekView({
   appointments,
   days,
@@ -540,21 +549,8 @@ function MobileWeekView({
   onWeekChange: (d: Date) => void;
 }) {
   const router = useRouter();
+  const scrollRef = useRef<HTMLDivElement>(null);
   const todayStr = formatDateISO(new Date());
-
-  // Find today's index, default to 0 (Monday)
-  const todayIndex = days.findIndex((d) => formatDateISO(d) === todayStr);
-  const [currentDayIndex, setCurrentDayIndex] = useState(
-    todayIndex >= 0 ? todayIndex : 0
-  );
-
-  const timeSlots = generateTimeSlots();
-  const currentDay = days[currentDayIndex];
-  const currentDateStr = formatDateISO(currentDay);
-
-  const dayAppointments = appointments.filter(
-    (a) => a.scheduledDate === currentDateStr && a.status !== "cancelled"
-  );
 
   // Action & move state
   const [actionAppt, setActionAppt] = useState<AgendaAppointment | null>(null);
@@ -568,35 +564,10 @@ function MobileWeekView({
     targetTime: string;
   } | null>(null);
 
-  // Swipe handling
-  const touchStartX = useRef(0);
-  const touchStartY = useRef(0);
-
-  function handleTouchStart(e: React.TouchEvent) {
-    touchStartX.current = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
-  }
-
-  function handleTouchEnd(e: React.TouchEvent) {
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    const dy = e.changedTouches[0].clientY - touchStartY.current;
-
-    // Only swipe if horizontal movement > vertical and > 50px threshold
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
-      if (dx < 0 && currentDayIndex < 6) {
-        setCurrentDayIndex((i) => i + 1);
-      } else if (dx > 0 && currentDayIndex > 0) {
-        setCurrentDayIndex((i) => i - 1);
-      }
-    }
-  }
-
-  function prevDay() {
-    if (currentDayIndex > 0) setCurrentDayIndex((i) => i - 1);
-  }
-  function nextDay() {
-    if (currentDayIndex < 6) setCurrentDayIndex((i) => i + 1);
-  }
+  // Scroll to top when week changes
+  useEffect(() => {
+    scrollRef.current?.scrollTo(0, 0);
+  }, [weekStart]);
 
   function openMoveFromAction() {
     if (!actionAppt) return;
@@ -651,119 +622,74 @@ function MobileWeekView({
     router.refresh();
   }
 
-  // Build appointment map for this day
-  const apptByTime = new Map<string, AgendaAppointment[]>();
-  for (const a of dayAppointments) {
-    const t = normalizeTime(a.scheduledTime);
-    if (t) {
-      const arr = apptByTime.get(t) || [];
-      arr.push(a);
-      apptByTime.set(t, arr);
-    }
-  }
-
-  const isToday = currentDateStr === todayStr;
-
   return (
-    <div>
+    <div ref={scrollRef}>
       <WeekHeader weekStart={weekStart} onWeekChange={onWeekChange} />
 
-      {/* Day selector */}
-      <div className="mb-3 flex items-center justify-between">
-        <button
-          onClick={prevDay}
-          disabled={currentDayIndex === 0}
-          className="flex h-10 w-10 items-center justify-center rounded-md border border-linha-suave hover:bg-creme-fundo disabled:opacity-30 cursor-pointer"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-
-        <div className="text-center">
-          <p className={cn(
-            "text-base font-semibold capitalize",
-            isToday ? "text-verde-ative" : "text-tinta-texto"
-          )}>
-            {format(currentDay, "EEEE", { locale: ptBR })}
-            {isToday && (
-              <span className="ml-1.5 text-xs font-normal text-verde-sucesso">
-                (hoje)
-              </span>
-            )}
-          </p>
-          <p className="text-sm text-cinza-texto">
-            {format(currentDay, "dd 'de' MMMM", { locale: ptBR })}
-          </p>
-          <p className="text-xs text-cinza-texto/60">
-            {currentDayIndex + 1} de 7
-          </p>
-        </div>
-
-        <button
-          onClick={nextDay}
-          disabled={currentDayIndex === 6}
-          className="flex h-10 w-10 items-center justify-center rounded-md border border-linha-suave hover:bg-creme-fundo disabled:opacity-30 cursor-pointer"
-        >
-          <ChevronRight className="h-5 w-5" />
-        </button>
-      </div>
-
-      {/* Dot indicators */}
-      <div className="mb-4 flex justify-center gap-1.5">
-        {days.map((day, i) => (
-          <button
-            key={i}
-            onClick={() => setCurrentDayIndex(i)}
-            className={cn(
-              "h-2 w-2 rounded-full transition-colors cursor-pointer",
-              i === currentDayIndex
-                ? "bg-verde-ative"
-                : "bg-cinza-texto/20"
-            )}
-            aria-label={format(day, "EEEE", { locale: ptBR })}
-          />
-        ))}
-      </div>
-
-      {/* Timeline */}
-      <div
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-        className="space-y-1"
-      >
-        {timeSlots.map((slot) => {
-          const slotAppts = apptByTime.get(slot) || [];
-
-          if (slotAppts.length > 0) {
-            return slotAppts.map((appt) => (
-              <button
-                key={appt.id}
-                onClick={() => setActionAppt(appt)}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left shadow-sm cursor-pointer",
-                  STATUS_COLORS[appt.status] || "bg-cinza-texto/20"
-                )}
-              >
-                <span className="text-sm font-semibold min-w-[40px]">
-                  {slot}
-                </span>
-                <span className="text-sm font-medium truncate flex-1">
-                  {appt.patientName}
-                </span>
-              </button>
-            ));
-          }
+      {/* Vertical week list */}
+      <div className="space-y-0">
+        {days.map((day) => {
+          const dateStr = formatDateISO(day);
+          const isToday = dateStr === todayStr;
+          const dayAppts = appointments
+            .filter((a) => a.scheduledDate === dateStr && a.status !== "cancelled")
+            .sort((a, b) => (a.scheduledTime || "").localeCompare(b.scheduledTime || ""));
 
           return (
-            <div
-              key={slot}
-              className="flex items-center gap-3 rounded-lg border border-dashed border-linha-suave px-3 py-2 min-h-[40px]"
-            >
-              <span className="text-sm text-cinza-texto/40 min-w-[40px]">
-                {slot}
-              </span>
-              <span className="text-xs text-cinza-texto/30">
-                Disponivel
-              </span>
+            <div key={dateStr}>
+              {/* Day header — sticky */}
+              <div
+                className={cn(
+                  "sticky top-0 z-10 border-b border-linha-suave",
+                  isToday
+                    ? "bg-verde-ative/8 border-l-4 border-l-verde-ative py-2.5 px-2"
+                    : "bg-creme-fundo py-2 px-1"
+                )}
+              >
+                <span
+                  className={cn(
+                    "text-sm font-semibold capitalize",
+                    isToday ? "text-verde-ative" : "text-tinta-texto"
+                  )}
+                >
+                  {format(day, "EEEE", { locale: ptBR })}
+                </span>
+                <span
+                  className={cn(
+                    "ml-2 text-sm uppercase",
+                    isToday ? "text-verde-ative/70" : "text-cinza-texto"
+                  )}
+                >
+                  · {format(day, "dd MMM", { locale: ptBR })}
+                </span>
+              </div>
+
+              {/* Appointments or empty state */}
+              <div className="py-1.5 space-y-1.5">
+                {dayAppts.length > 0 ? (
+                  dayAppts.map((appt) => (
+                    <button
+                      key={appt.id}
+                      onClick={() => setActionAppt(appt)}
+                      className={cn(
+                        "flex w-full items-center gap-3 rounded-lg border-l-[3px] bg-white px-3 py-2.5 text-left shadow-sm cursor-pointer",
+                        STATUS_BORDER[appt.status] || "border-l-cinza-texto/20"
+                      )}
+                    >
+                      <span className="text-sm font-semibold text-tinta-texto min-w-[42px]">
+                        {normalizeTime(appt.scheduledTime)}
+                      </span>
+                      <span className="text-sm font-medium text-tinta-texto truncate flex-1">
+                        {appt.patientName}
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="py-4 text-center text-sm text-cinza-texto/50">
+                    Sem atendimentos.
+                  </p>
+                )}
+              </div>
             </div>
           );
         })}
